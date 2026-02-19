@@ -63,15 +63,12 @@ The DataLoader notebook (`jupyter/dataloader/DataLoader_v2.ipynb`) lets you set 
 ### Starting Jupyter
 
 ```bash
-# Start Jupyter Lab (already defined in docker-compose, just needs to be started)
-docker compose up -d jupyter
-
-# Access at http://localhost:18888
-# Token: displayed in logs
-docker compose logs jupyter | grep token
+# Jupyter is included in docker compose and starts automatically
+# Access through Kong:
+open http://localhost:18000/jupyter/lab?token=digit-crs-local
 ```
 
-Or if using Tilt, click the "Start Jupyter" button in the dashboard.
+The default token is `digit-crs-local` (set via `JUPYTER_TOKEN` env var in docker-compose.yml). If using Tilt, click the "Start Jupyter" button in the dashboard.
 
 ### DataLoader Phases
 
