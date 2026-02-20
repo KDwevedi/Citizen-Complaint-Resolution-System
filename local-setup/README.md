@@ -240,29 +240,49 @@ All services have memory limits set in `docker-compose.yml` to prevent runaway u
 
 ## Development with Tilt
 
-Tilt provides a better development experience with a dashboard, live logs, and hot reload:
+Tilt wraps Docker Compose with a dashboard, live logs, service grouping, and utility buttons. There are multiple Tiltfiles for different use cases:
+
+| Tiltfile | Purpose | Requirements |
+|----------|---------|--------------|
+| `Tiltfile.db-dump` | Run the stack with pre-built images (no local builds) | Tilt only |
+| `Tiltfile` | Full dev mode with hot reload for PGR Java and UI | Tilt + Maven + Node.js/Yarn |
+
+### Choosing a Tiltfile
+
+Use the `-f` flag to pick which Tiltfile to use:
 
 ```bash
-# Install patched Tilt (see below), then:
+# Recommended: just run the stack (no code changes, no builds)
+tilt up -f Tiltfile.db-dump
+
+# Full dev mode with hot reload
 tilt up
 
 # Dashboard: http://localhost:10350
 ```
 
-### Installing Patched Tilt
-
-This project requires a patched version of Tilt that waits for Docker Compose health checks. The upstream Tilt has a bug where it marks containers "ready" before health checks pass.
+To stop:
 
 ```bash
-# Linux amd64
-curl -fsSL https://github.com/ChakshuGautam/tilt/releases/download/v0.36.3-healthcheck/tilt-linux-amd64.gz \
-  | gunzip > /usr/local/bin/tilt
-chmod +x /usr/local/bin/tilt
+tilt down -f Tiltfile.db-dump   # must match the -f flag used with tilt up
 ```
 
-PR to upstream: https://github.com/tilt-dev/tilt/pull/6682
+### Tiltfile.db-dump (Recommended for Getting Started)
 
-### Hot Reload
+Uses `docker-compose.yml` with pre-built images and the database dump. No Maven, no Yarn, no local builds needed. The Tilt dashboard gives you:
+
+- Services grouped by category (infrastructure, core-services, pgr, frontend, gateway, tools)
+- Health check links for every service
+- Utility buttons: **Nuke DB**, **Health Check**, **Smoke Tests**
+
+```bash
+tilt up -f Tiltfile.db-dump
+# Open http://localhost:10350
+```
+
+### Full Tiltfile (Hot Reload Development)
+
+The default `Tiltfile` supports live code editing with automatic rebuild:
 
 **PGR Services (Java)** - requires Maven:
 ```bash
@@ -282,6 +302,19 @@ cd ../frontend/micro-ui/web && yarn install && yarn build:webpack --watch
 ```bash
 TILT_CI=1 tilt up
 ```
+
+### Installing Patched Tilt
+
+This project requires a patched version of Tilt that waits for Docker Compose health checks. The upstream Tilt has a bug where it marks containers "ready" before health checks pass.
+
+```bash
+# Linux amd64
+curl -fsSL https://github.com/ChakshuGautam/tilt/releases/download/v0.36.3-healthcheck/tilt-linux-amd64.gz \
+  | gunzip > /usr/local/bin/tilt
+chmod +x /usr/local/bin/tilt
+```
+
+PR to upstream: https://github.com/tilt-dev/tilt/pull/6682
 
 ## API Access
 
