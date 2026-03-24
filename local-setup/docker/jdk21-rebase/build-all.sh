@@ -26,6 +26,10 @@ SERVICES=(
   "egov-localization:egovio/egov-localization:v2.9.2-4a60f20"
 )
 
+# egov-user is Spring Boot 1.5 / JDK 8 — needs a special Dockerfile
+# that injects JAXB jars and uses --add-opens flags.
+EGOV_USER_IMAGE="egovio/egov-user:master-fa75ba8"
+
 FILTER="${1:-}"
 BUILT=0
 FAILED=0
@@ -55,6 +59,25 @@ for entry in "${SERVICES[@]}"; do
   fi
   echo
 done
+
+# Build egov-user (unless filtered out)
+if [ -z "$FILTER" ] || [ "$FILTER" = "egov-user" ]; then
+  TAG="egovio/egov-user:jdk21-cds-local"
+  echo "=== Building ${TAG} (Spring Boot 1.5 + JAXB patch) ==="
+
+  if docker build \
+    --build-arg "SOURCE_IMAGE=${EGOV_USER_IMAGE}" \
+    -t "$TAG" \
+    -f "${SCRIPT_DIR}/Dockerfile.egov-user" \
+    "${SCRIPT_DIR}"; then
+    echo "=== OK: ${TAG} ==="
+    BUILT=$((BUILT + 1))
+  else
+    echo "=== FAILED: ${TAG} ==="
+    FAILED=$((FAILED + 1))
+  fi
+  echo
+fi
 
 echo "--- Summary ---"
 echo "Built:   ${BUILT}"

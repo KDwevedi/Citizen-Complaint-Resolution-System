@@ -308,7 +308,7 @@ services:
       - egov-network
 
   egov-user:
-    image: egovio/egov-user:master-fa75ba8
+    image: egovio/egov-user:jdk21-cds-local
     container_name: egov-user
     depends_on:
       pgbouncer:
@@ -344,7 +344,7 @@ services:
       EGOV_STATE_LEVEL_TENANT_ID: pg
       STATE_LEVEL_TENANT_ID: pg
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xms128m -Xmx384m
+      JAVA_TOOL_OPTIONS: -Xmx384m
     ports:
       - 18107:8107
     healthcheck:
@@ -356,7 +356,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 384M
           cpus: '0.5'
     networks:
       - egov-network
