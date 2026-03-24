@@ -160,7 +160,7 @@ services:
 
   # MDMS Backend
   mdms-backend:
-    image: egovio/mdms-v2:v2.9.2-4a60f20
+    image: egovio/mdms-v2:jdk21-cds-local
     container_name: mdms-backend
     depends_on:
       pgbouncer:
@@ -178,7 +178,8 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
       SERVER_PORT: 8094
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8094/mdms-v2/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -188,7 +189,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 300M
           cpus: '1'
     networks:
       - egov-network
@@ -218,7 +219,7 @@ services:
       - egov-network
 
   egov-enc-service:
-    image: egovio/egov-enc-service:v2.9.2-4a60f20
+    image: egovio/egov-enc-service:jdk21-cds-local
     container_name: egov-enc-service
     depends_on:
       egov-mdms-service:
@@ -241,7 +242,8 @@ services:
       EGOV_MDMS_SEARCH_ENDPOINT: /mdms-v2/v1/_search
       EGOV_STATE_LEVEL_TENANT_ID: pg
       STATE_LEVEL_TENANT_ID: pg
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 11234:1234
     healthcheck:
@@ -253,13 +255,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 300M
+          memory: 256M
           cpus: '0.25'
     networks:
       - egov-network
 
   egov-idgen:
-    image: egovio/egov-idgen:v2.9.2-4a60f20
+    image: egovio/egov-idgen:jdk21-cds-local
     container_name: egov-idgen
     depends_on:
       pgbouncer:
@@ -286,7 +288,8 @@ services:
       SERVER_PORT: 8088
       OTEL_TRACES_EXPORTER: none
       MANAGEMENT_HEALTH_DB_ENABLED: 'false'
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18088:8088
     healthcheck:
@@ -358,7 +361,7 @@ services:
       - egov-network
 
   egov-workflow-v2:
-    image: egovio/egov-workflow-v2:v2.9.2-4a60f20
+    image: egovio/egov-workflow-v2:jdk21-cds-local
     container_name: egov-workflow-v2
     depends_on:
       pgbouncer:
@@ -384,7 +387,8 @@ services:
       EGOV_STATE_LEVEL_TENANT_ID: pg
       IS_ENVIRONMENT_CENTRAL_INSTANCE: 'false'
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m
+      JAVA_TOOL_OPTIONS: -Xmx256m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18109:8109
     healthcheck:
@@ -396,13 +400,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 320M
+          memory: 300M
           cpus: '0.25'
     networks:
       - egov-network
 
   egov-localization:
-    image: egovio/egov-localization:v2.9.2-4a60f20
+    image: egovio/egov-localization:jdk21-cds-local
     container_name: egov-localization
     depends_on:
       pgbouncer:
@@ -425,7 +429,8 @@ services:
       SPRING_REDIS_PORT: 6379
       SERVER_PORT: 8096
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx512m
+      JAVA_TOOL_OPTIONS: -Xmx512m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18096:8096
     healthcheck:
@@ -437,13 +442,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 640M
+          memory: 400M
           cpus: '1'
     networks:
       - egov-network
 
   boundary-service:
-    image: egovio/boundary-service:v2.9.2-4a60f20
+    image: egovio/boundary-service:jdk21-cds-local
     container_name: boundary-service
     depends_on:
       pgbouncer:
@@ -473,7 +478,8 @@ services:
       OTEL_TRACES_EXPORTER: none
       OTEL_INSTRUMENTATION_JDBC_ENABLED: 'false'
       MANAGEMENT_HEALTH_DB_ENABLED: 'false'
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18081:8081
     healthcheck:
@@ -491,7 +497,7 @@ services:
       - egov-network
 
   egov-accesscontrol:
-    image: egovio/egov-accesscontrol:v2.9.2-4a60f20
+    image: egovio/egov-accesscontrol:jdk21-cds-local
     container_name: egov-accesscontrol
     depends_on:
       pgbouncer:
@@ -511,7 +517,8 @@ services:
       SERVER_PORT: 8090
       EGOV_MDMS_HOST: http://egov-mdms-service:8094/
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18090:8090
     healthcheck:
@@ -529,7 +536,7 @@ services:
       - egov-network
 
   egov-persister:
-    image: egovio/egov-persister:v2.9.2-4a60f20
+    image: egovio/egov-persister:jdk21-cds-local
     container_name: egov-persister
     depends_on:
       pgbouncer:
@@ -549,7 +556,8 @@ services:
       SERVER_PORT: 8091
       EGOV_PERSIST_YML_REPO_PATH: /persister-config/
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
     volumes:
       - ./configs/persister:/persister-config:ro
     ports:
@@ -569,7 +577,7 @@ services:
       - egov-network
 
   egov-filestore:
-    image: egovio/egov-filestore:v2.9.2-4a60f20
+    image: egovio/egov-filestore:jdk21-cds-local
     container_name: egov-filestore
     depends_on:
       pgbouncer:
@@ -587,7 +595,8 @@ services:
       SPRING_FLYWAY_ENABLED: 'false'
       SERVER_PORT: 8083
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
       ISS3ENABLED: 'true'
       MINIO_URL: http://minio:9000
       AWS_KEY: minioadmin
@@ -607,13 +616,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: 300M
           cpus: '0.25'
     networks:
       - egov-network
 
   egov-hrms:
-    image: egovio/egov-hrms:hrms-boundary-0a4e737
+    image: egovio/egov-hrms:jdk21-cds-local
     container_name: egov-hrms
     depends_on:
       pgbouncer:
@@ -638,7 +647,8 @@ services:
       SPRING_KAFKA_CONSUMER_GROUP_ID: employee-group1
       SERVER_PORT: 8092
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
       EGOV_MDMS_HOST: http://egov-mdms-service:8094
       EGOV_IDGEN_HOST: http://egov-idgen:8088
       EGOV_USER_HOST: http://egov-user:8107
@@ -715,7 +725,7 @@ services:
       - egov-network
 
   egov-url-shortening:
-    image: egovio/egov-url-shortening:v2.9.2-4a60f20
+    image: egovio/egov-url-shortening:jdk21-cds-local
     container_name: egov-url-shortening
     depends_on:
       pgbouncer:
@@ -730,7 +740,8 @@ services:
       SERVER_PORT: 8080
       OTEL_TRACES_EXPORTER: none
       OTEL_INSTRUMENTATION_JDBC_ENABLED: 'false'
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx128m
+      JAVA_TOOL_OPTIONS: -Xmx128m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18085:8080
     healthcheck:
@@ -742,13 +753,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 192M
+          memory: 256M
           cpus: '0.25'
     networks:
       - egov-network
 
   pgr-services:
-    image: egovio/pgr-services:multiarch-d448cb7
+    image: egovio/pgr-services:jdk21-cds-local
     container_name: pgr-services
     depends_on:
       pgbouncer:
@@ -797,7 +808,8 @@ services:
       PGR_STATELEVEL_TENANTID: pg
       STATE_LEVEL_TENANT_ID: pg
       EGOV_STATE_LEVEL_TENANT_ID: pg
-      JAVA_OPTS: '-Xmx192m -Xms192m'
+      JAVA_TOOL_OPTIONS: -Xmx192m
+      SPRING_THREADS_VIRTUAL_ENABLED: "true"
       OTEL_TRACES_EXPORTER: none
     ports:
       - "18083:8080"
