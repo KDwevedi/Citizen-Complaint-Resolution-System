@@ -179,7 +179,7 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
       SERVER_PORT: 8094
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8094/mdms-v2/health >/dev/null 2>&1 || exit 1"]
@@ -243,7 +243,7 @@ services:
       EGOV_MDMS_SEARCH_ENDPOINT: /mdms-v2/v1/_search
       EGOV_STATE_LEVEL_TENANT_ID: pg
       STATE_LEVEL_TENANT_ID: pg
-      JAVA_TOOL_OPTIONS: -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 11234:1234
@@ -289,7 +289,7 @@ services:
       SERVER_PORT: 8088
       OTEL_TRACES_EXPORTER: none
       MANAGEMENT_HEALTH_DB_ENABLED: 'false'
-      JAVA_TOOL_OPTIONS: -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18088:8088
@@ -344,7 +344,7 @@ services:
       EGOV_STATE_LEVEL_TENANT_ID: pg
       STATE_LEVEL_TENANT_ID: pg
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xmx384m
+      JAVA_TOOL_OPTIONS: -Xmx384m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
     ports:
       - 18107:8107
     healthcheck:
@@ -356,7 +356,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: 640M
           cpus: '0.5'
     networks:
       - egov-network
@@ -388,7 +388,7 @@ services:
       EGOV_STATE_LEVEL_TENANT_ID: pg
       IS_ENVIRONMENT_CENTRAL_INSTANCE: 'false'
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xmx256m
+      JAVA_TOOL_OPTIONS: -Xmx256m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18109:8109
@@ -401,7 +401,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 300M
+          memory: 400M
           cpus: '0.25'
     networks:
       - egov-network
@@ -430,7 +430,7 @@ services:
       SPRING_REDIS_PORT: 6379
       SERVER_PORT: 8096
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xmx512m
+      JAVA_TOOL_OPTIONS: -Xmx512m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18096:8096
@@ -479,7 +479,7 @@ services:
       OTEL_TRACES_EXPORTER: none
       OTEL_INSTRUMENTATION_JDBC_ENABLED: 'false'
       MANAGEMENT_HEALTH_DB_ENABLED: 'false'
-      JAVA_TOOL_OPTIONS: -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18081:8081
@@ -518,7 +518,7 @@ services:
       SERVER_PORT: 8090
       EGOV_MDMS_HOST: http://egov-mdms-service:8094/
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18090:8090
@@ -557,7 +557,7 @@ services:
       SERVER_PORT: 8091
       EGOV_PERSIST_YML_REPO_PATH: /persister-config/
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
     volumes:
       - ./configs/persister:/persister-config:ro
@@ -572,7 +572,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 300M
           cpus: '0.25'
     networks:
       - egov-network
@@ -596,7 +596,7 @@ services:
       SPRING_FLYWAY_ENABLED: 'false'
       SERVER_PORT: 8083
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
       ISS3ENABLED: 'true'
       MINIO_URL: http://minio:9000
@@ -648,7 +648,7 @@ services:
       SPRING_KAFKA_CONSUMER_GROUP_ID: employee-group1
       SERVER_PORT: 8092
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
       EGOV_MDMS_HOST: http://egov-mdms-service:8094
       EGOV_IDGEN_HOST: http://egov-idgen:8088
@@ -741,7 +741,7 @@ services:
       SERVER_PORT: 8080
       OTEL_TRACES_EXPORTER: none
       OTEL_INSTRUMENTATION_JDBC_ENABLED: 'false'
-      JAVA_TOOL_OPTIONS: -Xmx128m
+      JAVA_TOOL_OPTIONS: -Xmx128m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
     ports:
       - 18085:8080
@@ -809,7 +809,7 @@ services:
       PGR_STATELEVEL_TENANTID: pg
       STATE_LEVEL_TENANT_ID: pg
       EGOV_STATE_LEVEL_TENANT_ID: pg
-      JAVA_TOOL_OPTIONS: -Xmx192m
+      JAVA_TOOL_OPTIONS: -Xmx192m -XX:+UseSerialGC -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=64m -Xss512k
       SPRING_THREADS_VIRTUAL_ENABLED: "true"
       OTEL_TRACES_EXPORTER: none
     ports:
@@ -823,7 +823,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 300M
+          memory: 400M
           cpus: '0.25'
     networks:
       - egov-network
