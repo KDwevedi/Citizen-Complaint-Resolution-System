@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.egov.pgr.util.PGRConstants.MDMS_MODULE_NAME;
 import static org.egov.pgr.util.PGRConstants.MDMS_SERVICEDEF;
@@ -29,6 +30,8 @@ public class MDMSUtils {
     @Autowired
     private MultiStateInstanceUtil multiStateInstanceUtil;
 
+    private final ConcurrentHashMap<String, Object> mdmsCache = new ConcurrentHashMap<>();
+
     @Autowired
     public MDMSUtils(PGRConfiguration config, ServiceRequestRepository serviceRequestRepository) {
         this.config = config;
@@ -36,16 +39,20 @@ public class MDMSUtils {
     }
 
     /**
-     * Calls MDMS service to fetch pgr master data
+     * Calls MDMS service to fetch pgr master data. Results are cached per state-level tenant
+     * since ServiceDefs do not change at runtime.
      * @param request
      * @return
      */
     public Object mDMSCall(ServiceRequest request){
         RequestInfo requestInfo = request.getRequestInfo();
         String tenantId = request.getService().getTenantId();
-        MdmsCriteriaReq mdmsCriteriaReq = getMDMSRequest(requestInfo,multiStateInstanceUtil.getStateLevelTenant(tenantId));
-        Object result = serviceRequestRepository.fetchResult(getMdmsSearchUrl(), mdmsCriteriaReq);
-        return result;
+        String stateTenant = multiStateInstanceUtil.getStateLevelTenant(tenantId);
+
+        return mdmsCache.computeIfAbsent(stateTenant, key -> {
+            MdmsCriteriaReq mdmsCriteriaReq = getMDMSRequest(requestInfo, key);
+            return serviceRequestRepository.fetchResult(getMdmsSearchUrl(), mdmsCriteriaReq);
+        });
     }
 
 

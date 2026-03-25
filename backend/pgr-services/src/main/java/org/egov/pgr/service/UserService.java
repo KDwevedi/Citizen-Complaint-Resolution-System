@@ -14,6 +14,7 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -26,6 +27,9 @@ public class UserService {
     private UserUtils userUtils;
 
     private PGRConfiguration config;
+
+    private final ConcurrentHashMap<String, User> userCacheByUuid = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, User> userCacheByPhone = new ConcurrentHashMap<>();
 
     @Autowired
     public UserService(UserUtils userUtils, PGRConfiguration config) {
@@ -58,7 +62,23 @@ public class UserService {
             uuids.add(serviceWrapper.getService().getAccountId());
         });
 
-        Map<String, User> idToUserMap = searchBulkUser(new LinkedList<>(uuids));
+        // Resolve as many as possible from cache, only fetch uncached UUIDs
+        Map<String, User> idToUserMap = new HashMap<>();
+        List<String> uncachedUuids = new ArrayList<>();
+        for (String uuid : uuids) {
+            User cached = userCacheByUuid.get(uuid);
+            if (cached != null) {
+                idToUserMap.put(uuid, cached);
+            } else {
+                uncachedUuids.add(uuid);
+            }
+        }
+
+        if (!uncachedUuids.isEmpty()) {
+            Map<String, User> fetched = searchBulkUser(uncachedUuids);
+            fetched.forEach((k, v) -> userCacheByUuid.put(k, v));
+            idToUserMap.putAll(fetched);
+        }
 
         serviceWrappers.forEach(serviceWrapper -> {
             serviceWrapper.getService().setCitizen(idToUserMap.get(serviceWrapper.getService().getAccountId()));
@@ -76,10 +96,19 @@ public class UserService {
 
         User user = request.getService().getCitizen();
         String tenantId = request.getService().getTenantId();
+        String phone = user.getMobileNumber();
+
+        // Check phone cache — if name matches, skip the HTTP call
+        User cached = userCacheByPhone.get(phone);
+        if (cached != null && user.getName().equalsIgnoreCase(cached.getName())) {
+            request.getService().setAccountId(cached.getUuid());
+            return;
+        }
+
         User userServiceResponse = null;
 
         // Search on mobile number as user name
-        UserDetailResponse userDetailResponse = searchUser(userUtils.getStateLevelTenant(tenantId),null, user.getMobileNumber());
+        UserDetailResponse userDetailResponse = searchUser(userUtils.getStateLevelTenant(tenantId),null, phone);
         if (!userDetailResponse.getUser().isEmpty()) {
             User userFromSearch = userDetailResponse.getUser().get(0);
             if(!user.getName().equalsIgnoreCase(userFromSearch.getName())){
@@ -90,6 +119,9 @@ public class UserService {
         else {
             userServiceResponse = createUser(request.getRequestInfo(),tenantId,user);
         }
+
+        userCacheByPhone.put(phone, userServiceResponse);
+        userCacheByUuid.put(userServiceResponse.getUuid(), userServiceResponse);
 
         // Enrich the accountId
         request.getService().setAccountId(userServiceResponse.getUuid());
@@ -106,12 +138,20 @@ public class UserService {
         String accountId = request.getService().getAccountId();
         String tenantId = request.getService().getTenantId();
 
+        User cached = userCacheByUuid.get(accountId);
+        if (cached != null) {
+            request.getService().setCitizen(cached);
+            return;
+        }
+
         UserDetailResponse userDetailResponse = searchUser(userUtils.getStateLevelTenant(tenantId),accountId,null);
 
         if(userDetailResponse.getUser().isEmpty())
             throw new CustomException("INVALID_ACCOUNTID","No user exist for the given accountId");
 
-        else request.getService().setCitizen(userDetailResponse.getUser().get(0));
+        User user = userDetailResponse.getUser().get(0);
+        userCacheByUuid.put(accountId, user);
+        request.getService().setCitizen(user);
 
     }
 

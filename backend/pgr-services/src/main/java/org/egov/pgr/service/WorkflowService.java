@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.CollectionUtils;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import static org.egov.pgr.util.PGRConstants.*;
@@ -26,6 +27,7 @@ public class WorkflowService {
 
     private ObjectMapper mapper;
 
+    private final ConcurrentHashMap<String, BusinessService> businessServiceCache = new ConcurrentHashMap<>();
 
     @Autowired
     public WorkflowService(PGRConfiguration pgrConfiguration, ServiceRequestRepository repository, ObjectMapper mapper) {
@@ -36,25 +38,29 @@ public class WorkflowService {
 
     /*
      *
-     * Should return the applicable BusinessService for the given request
+     * Should return the applicable BusinessService for the given request.
+     * Cached per tenantId since the PGR business service definition does not change at runtime.
      *
      * */
     public BusinessService getBusinessService(ServiceRequest serviceRequest) {
         String tenantId = serviceRequest.getService().getTenantId();
-        StringBuilder url = getSearchURLWithParams(tenantId, PGR_BUSINESSSERVICE);
-        RequestInfoWrapper requestInfoWrapper = RequestInfoWrapper.builder().requestInfo(serviceRequest.getRequestInfo()).build();
-        Object result = repository.fetchResult(url, requestInfoWrapper);
-        BusinessServiceResponse response = null;
-        try {
-            response = mapper.convertValue(result, BusinessServiceResponse.class);
-        } catch (IllegalArgumentException e) {
-            throw new CustomException("PARSING ERROR", "Failed to parse response of workflow business service search");
-        }
 
-        if (CollectionUtils.isEmpty(response.getBusinessServices()))
-            throw new CustomException("BUSINESSSERVICE_NOT_FOUND", "The businessService " + PGR_BUSINESSSERVICE + " is not found");
+        return businessServiceCache.computeIfAbsent(tenantId, key -> {
+            StringBuilder url = getSearchURLWithParams(key, PGR_BUSINESSSERVICE);
+            RequestInfoWrapper requestInfoWrapper = RequestInfoWrapper.builder().requestInfo(serviceRequest.getRequestInfo()).build();
+            Object result = repository.fetchResult(url, requestInfoWrapper);
+            BusinessServiceResponse response = null;
+            try {
+                response = mapper.convertValue(result, BusinessServiceResponse.class);
+            } catch (IllegalArgumentException e) {
+                throw new CustomException("PARSING ERROR", "Failed to parse response of workflow business service search");
+            }
 
-        return response.getBusinessServices().get(0);
+            if (CollectionUtils.isEmpty(response.getBusinessServices()))
+                throw new CustomException("BUSINESSSERVICE_NOT_FOUND", "The businessService " + PGR_BUSINESSSERVICE + " is not found");
+
+            return response.getBusinessServices().get(0);
+        });
     }
 
 

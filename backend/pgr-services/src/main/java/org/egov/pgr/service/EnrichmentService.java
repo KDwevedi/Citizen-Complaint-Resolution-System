@@ -7,6 +7,8 @@ import org.egov.pgr.util.PGRUtils;
 import org.egov.pgr.web.models.*;
 import org.egov.pgr.web.models.Idgen.IdResponse;
 import org.egov.tracer.model.CustomException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -14,6 +16,10 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import static org.egov.pgr.util.PGRConstants.USERTYPE_CITIZEN;
@@ -21,6 +27,8 @@ import static org.egov.pgr.util.PGRConstants.USERTYPE_CITIZEN;
 @org.springframework.stereotype.Service
 public class EnrichmentService {
 
+    private static final Logger log = LoggerFactory.getLogger(EnrichmentService.class);
+    private static final ExecutorService VIRTUAL = Executors.newVirtualThreadPerTaskExecutor();
 
     private PGRUtils utils;
 
@@ -54,8 +62,35 @@ public class EnrichmentService {
         if(requestInfo.getUserInfo().getType().equalsIgnoreCase(USERTYPE_CITIZEN))
             serviceRequest.getService().setAccountId(requestInfo.getUserInfo().getUuid());
 
-        userService.callUserService(serviceRequest);
+        // Run user enrichment and idGen in parallel — they are independent
+        long[] userMs = {0}, idGenMs = {0};
+        CompletableFuture<Void> userFuture = CompletableFuture.runAsync(() -> {
+            long s = System.nanoTime();
+            userService.callUserService(serviceRequest);
+            userMs[0] = (System.nanoTime() - s) / 1_000_000;
+        }, VIRTUAL);
+        CompletableFuture<List<String>> idGenFuture = CompletableFuture.supplyAsync(() -> {
+            long s = System.nanoTime();
+            List<String> result = getIdList(requestInfo, tenantId, config.getServiceRequestIdGenName(), config.getServiceRequestIdGenFormat(), 1);
+            idGenMs[0] = (System.nanoTime() - s) / 1_000_000;
+            return result;
+        }, VIRTUAL);
 
+        try {
+            userFuture.join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof RuntimeException re) throw re;
+            throw new CustomException("USER_ENRICH_ERROR", e.getCause().getMessage());
+        }
+
+        List<String> customIds;
+        try {
+            customIds = idGenFuture.join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof RuntimeException re) throw re;
+            throw new CustomException("IDGEN_ERROR", e.getCause().getMessage());
+        }
+        log.info("TIMING ENRICH_CREATE user={}ms idGen={}ms", userMs[0], idGenMs[0]);
 
         AuditDetails auditDetails = utils.getAuditDetails(requestInfo.getUserInfo().getUuid(), service,true);
 
@@ -73,8 +108,6 @@ public class EnrichmentService {
 
         if(StringUtils.isEmpty(service.getAccountId()))
             service.setAccountId(service.getCitizen().getUuid());
-
-        List<String> customIds = getIdList(requestInfo,tenantId,config.getServiceRequestIdGenName(),config.getServiceRequestIdGenFormat(),1);
 
         service.setServiceRequestId(customIds.get(0));
 

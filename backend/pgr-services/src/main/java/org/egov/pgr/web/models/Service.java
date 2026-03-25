@@ -4,7 +4,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.annotations.ApiModel;
 import org.egov.pgr.annotation.CharacterConstraint;
 import org.egov.pgr.web.models.workflow.ProcessInstance;
-import org.hibernate.validator.constraints.SafeHtml;
 import org.springframework.validation.annotation.Validated;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -37,29 +36,23 @@ public class Service   {
         @JsonProperty("citizen")
         private User citizen = null;
 
-        @SafeHtml
         @JsonProperty("id")
         private String id = null;
 
         @NotNull
-        @SafeHtml
         @JsonProperty("tenantId")
         private String tenantId = null;
 
         @NotNull
-        @SafeHtml
         @JsonProperty("serviceCode")
         private String serviceCode = null;
 
-        @SafeHtml
         @JsonProperty("serviceRequestId")
         private String serviceRequestId = null;
 
-        @SafeHtml
         @JsonProperty("description")
         private String description = null;
 
-        @SafeHtml
         @JsonProperty("accountId")
         private String accountId = null;
 
@@ -72,12 +65,10 @@ public class Service   {
         @JsonProperty("additionalDetail")
         private Object additionalDetail = null;
 
-        @SafeHtml
         @JsonProperty("applicationStatus")
         private String applicationStatus = null;
 
         @NotNull
-        @SafeHtml
         @JsonProperty("source")
         private String source = null;
 
