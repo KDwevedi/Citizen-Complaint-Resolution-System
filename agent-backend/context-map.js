@@ -4,8 +4,67 @@
  */
 
 const PGR_SRC = "frontend/micro-ui/web/micro-ui-internals/packages/modules/pgr/src";
+const CFG_SRC = "utilities/crs_dataloader/ui-mockup/src";
 
 const ROUTE_COMPONENTS = {
+  // === Configurator routes ===
+  "/login": {
+    description: "Configurator login page",
+    files: [CFG_SRC + "/pages/LoginPage.tsx", CFG_SRC + "/api/client.ts", CFG_SRC + "/api/config.ts"],
+  },
+  "/manage": {
+    description: "Configurator management dashboard (react-admin)",
+    files: [CFG_SRC + "/admin/DigitDashboard.tsx", CFG_SRC + "/admin/DigitLayout.tsx", CFG_SRC + "/App.tsx"],
+  },
+  "/manage/departments": {
+    description: "Departments CRUD list",
+    files: [CFG_SRC + "/resources/departments/index.tsx", CFG_SRC + "/admin/DigitList.tsx", CFG_SRC + "/admin/DigitDatagrid.tsx"],
+  },
+  "/manage/employees": {
+    description: "Employees CRUD list",
+    files: [CFG_SRC + "/resources/employees/index.tsx", CFG_SRC + "/admin/DigitList.tsx", CFG_SRC + "/admin/DigitDatagrid.tsx"],
+  },
+  "/manage/complaints": {
+    description: "Complaints CRUD list",
+    files: [CFG_SRC + "/resources/complaints/index.tsx", CFG_SRC + "/admin/DigitList.tsx", CFG_SRC + "/admin/DigitDatagrid.tsx"],
+  },
+  "/manage/complaint-types": {
+    description: "Complaint types CRUD list",
+    files: [CFG_SRC + "/resources/complaint-types/index.tsx", CFG_SRC + "/admin/DigitList.tsx"],
+  },
+  "/manage/boundaries": {
+    description: "Boundaries CRUD list",
+    files: [CFG_SRC + "/resources/boundaries/index.tsx", CFG_SRC + "/admin/DigitList.tsx"],
+  },
+  "/manage/localization": {
+    description: "Localization strings CRUD",
+    files: [CFG_SRC + "/resources/localization/index.tsx", CFG_SRC + "/admin/DigitList.tsx"],
+  },
+  "/manage/users": {
+    description: "Users CRUD list",
+    files: [CFG_SRC + "/resources/users/index.tsx", CFG_SRC + "/admin/DigitList.tsx"],
+  },
+  "/manage/advanced": {
+    description: "Advanced settings page",
+    files: [CFG_SRC + "/resources/advanced/AdvancedPage.tsx"],
+  },
+  "/phase/1": {
+    description: "Onboarding phase 1",
+    files: [CFG_SRC + "/pages/Phase1Page.tsx"],
+  },
+  "/phase/2": {
+    description: "Onboarding phase 2",
+    files: [CFG_SRC + "/pages/Phase2Page.tsx"],
+  },
+  "/phase/3": {
+    description: "Onboarding phase 3",
+    files: [CFG_SRC + "/pages/Phase3Page.tsx"],
+  },
+  "/phase/4": {
+    description: "Onboarding phase 4",
+    files: [CFG_SRC + "/pages/Phase4Page.tsx"],
+  },
+  // === PGR micro-ui routes ===
   "/employee/pgr/inbox-v2": {
     description: "Employee complaint inbox - search, filter, and list complaints",
     files: [
@@ -55,7 +114,18 @@ const ROUTE_COMPONENTS = {
   },
 };
 
-// Shared files that are relevant regardless of route
+// Configurator shared files
+const CFG_SHARED = [
+  CFG_SRC + "/App.tsx",
+  CFG_SRC + "/admin/DigitList.tsx",
+  CFG_SRC + "/admin/DigitDatagrid.tsx",
+  CFG_SRC + "/admin/DigitLayout.tsx",
+  CFG_SRC + "/admin/schemaUtils.ts",
+  CFG_SRC + "/api/client.ts",
+  CFG_SRC + "/providers/bridge.ts",
+];
+
+// PGR shared files
 const SHARED_FILES = [
   PGR_SRC + "/Module.js",
   PGR_SRC + "/services/pgr/PGRService.js",
@@ -78,11 +148,13 @@ function resolveContext(currentRoute) {
   }
 
   const routeInfo = bestMatch ? ROUTE_COMPONENTS[bestMatch] : null;
+  // Pick shared files based on whether route is configurator or PGR
+  const isConfigurator = currentRoute.includes("/manage") || currentRoute.includes("/phase") || currentRoute.includes("/login");
   return {
     matchedRoute: bestMatch,
     description: routeInfo ? routeInfo.description : "Unknown page",
     relevantFiles: routeInfo ? routeInfo.files : [],
-    sharedFiles: SHARED_FILES,
+    sharedFiles: isConfigurator ? CFG_SHARED : SHARED_FILES,
   };
 }
 

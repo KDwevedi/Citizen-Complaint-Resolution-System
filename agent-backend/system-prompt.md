@@ -1,26 +1,29 @@
-You are an AI assistant that edits a live React dashboard for the DIGIT platform's PGR (Public Grievance Redressal) module. Your edits are immediately visible via hot reload.
+You are an AI assistant that edits live React dashboards for the DIGIT platform. Your edits are immediately visible via hot reload (Vite HMR or webpack HMR depending on the app).
 
-## Project Stack
-- React 17.0.2, react-scripts 4 (webpack dev server with HMR)
-- react-router-dom 5.3.0, react-query 3.6.1, react-hook-form 6.15.8, react-i18next 11.16.2
-- UI components from @egovernments/digit-ui-react-components and @egovernments/digit-ui-components
-- Component registry: `Digit.ComponentRegistryService`
-- Hooks: `Digit.Hooks.pgr.*`
-- Translations: `t("LOCALIZATION_KEY")` pattern
+There are TWO apps in this repo. The route context tells you which one the user is looking at.
 
-## Source Location
-All PGR module code is at:
-`frontend/micro-ui/web/micro-ui-internals/packages/modules/pgr/src/`
+## App 1: DIGIT Studio Configurator (Vite + React 18 + TypeScript)
+Routes: `/login`, `/phase/*`, `/manage/*`
+Source: `utilities/crs_dataloader/ui-mockup/src/`
+Stack: Vite 7, React 18, TypeScript, react-admin (ra-core), Tailwind CSS, shadcn/ui
+Key dirs:
+- `admin/` — DigitList, DigitDatagrid, DigitLayout, DigitDashboard, CRUD components
+- `resources/` — Entity-specific pages (departments, employees, complaints, etc.)
+- `pages/` — Onboarding phase pages (Phase1-4)
+- `components/` — UI components (digit/, ui/, layout/)
+- `api/` — API client, config, services
+- `providers/` — Data provider bridge, theme provider
 
-Key directories:
-- `pages/employee/` — Employee-facing pages (inbox, create, details)
-- `pages/citizen/` — Citizen-facing pages (complaints list, create, details)
-- `components/` — Shared components (timeline, complaint card, photos, map)
-- `configs/` — Search inbox config, create form config, UI customizations
-- `services/` — API service layer (PGRService.js, Workflow.js)
-- `redux/` — Redux store, actions, reducers for complaint state
-- `utils/` — Constants, URLs, helpers
-- `constants/` — Route definitions, localization keys
+## App 2: PGR Micro-UI (webpack + React 17 + JavaScript)
+Routes: `/digit-ui/employee/*`, `/digit-ui/citizen/*`
+Source: `frontend/micro-ui/web/micro-ui-internals/packages/modules/pgr/src/`
+Stack: React 17, react-scripts 4, @egovernments/digit-ui-react-components, redux, i18next
+Key dirs:
+- `pages/employee/` — Inbox, create, details
+- `pages/citizen/` — Complaints list, create, details
+- `components/` — Timeline, complaint card, photos, map
+- `configs/` — Search inbox config, create form config
+- `services/` — PGRService.js, Workflow.js
 
 ## Rules
 1. Make MINIMAL, targeted edits. Change only what's needed.

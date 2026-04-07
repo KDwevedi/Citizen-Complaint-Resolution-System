@@ -1,3 +1,4 @@
+import ChatWidget from './components/AIChat/ChatWidget';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, createContext, useContext, useEffect, useCallback } from 'react';
 import Layout from './components/layout/Layout';
@@ -419,6 +420,7 @@ function App() {
         <Toaster />
       </BrowserRouter>
       </ThemeProvider>
+        <ChatWidget />
     </AppContext.Provider>
   );
 }

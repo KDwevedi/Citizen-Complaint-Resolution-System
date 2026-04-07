@@ -12,5 +12,11 @@ export default defineConfig({
   },
   server: {
     allowedHosts: ['crs-mockup.egov.theflywheel.in'],
+    proxy: {
+      '/api/agent': {
+        target: 'http://localhost:4100',
+        changeOrigin: true,
+      },
+    },
   },
 })
