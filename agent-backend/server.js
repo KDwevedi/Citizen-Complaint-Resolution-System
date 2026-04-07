@@ -1,10 +1,22 @@
 const express = require("express");
 const cors = require("cors");
 const { spawn } = require("child_process");
-const fs = require("fs");
 const path = require("path");
+const {
+  getSessionStatus,
+  createSession,
+  getSession,
+  autoCommit,
+  getSessionChanges,
+  resetSession,
+  acceptSession,
+  discardSession,
+  getVersions,
+  getLog,
+  rollbackMain,
+  cleanupOrphans,
+} = require("./git-ops");
 const { resolveContext } = require("./context-map");
-const { autoCommit, getLog, rollback, saveVersion } = require("./git-ops");
 
 const app = express();
 app.use(cors());
@@ -12,7 +24,6 @@ app.use(express.json({ limit: "1mb" }));
 
 const PORT = 4100;
 const REPO_ROOT = "/opt/egov/ccrs-dashboard";
-// System prompt loaded via --system-prompt-file flag
 
 function describeToolAction(tool, file) {
   const f = file ? ` ${file}` : "";
@@ -32,7 +43,7 @@ function describeToolAction(tool, file) {
   }
 }
 
-// Mutex: only one Claude subprocess at a time
+// Mutex: only one Claude subprocess at a time, also guards git state changes
 let busy = false;
 const queue = [];
 
@@ -49,19 +60,92 @@ function acquireLock() {
 
 function releaseLock() {
   if (queue.length > 0) {
-    const next = queue.shift();
-    next();
+    queue.shift()();
   } else {
     busy = false;
   }
 }
 
-// POST /api/agent/chat — main chat endpoint, returns SSE stream
+// --- Session endpoints ---
+
+app.get("/api/agent/session", (req, res) => {
+  res.json(getSessionStatus());
+});
+
+app.post("/api/agent/session/start", async (req, res) => {
+  await acquireLock();
+  try {
+    res.json(createSession());
+  } finally {
+    releaseLock();
+  }
+});
+
+app.post("/api/agent/session/accept", async (req, res) => {
+  const { label } = req.body;
+  if (!label) return res.status(400).json({ error: "label is required" });
+  await acquireLock();
+  try {
+    res.json(acceptSession(label));
+  } finally {
+    releaseLock();
+  }
+});
+
+app.post("/api/agent/session/discard", async (req, res) => {
+  await acquireLock();
+  try {
+    res.json(discardSession());
+  } finally {
+    releaseLock();
+  }
+});
+
+app.get("/api/agent/session/changes", (req, res) => {
+  res.json(getSessionChanges());
+});
+
+app.post("/api/agent/session/rollback", async (req, res) => {
+  const { commitHash } = req.body;
+  if (!commitHash) return res.status(400).json({ error: "commitHash is required" });
+  await acquireLock();
+  try {
+    res.json(resetSession(commitHash));
+  } finally {
+    releaseLock();
+  }
+});
+
+// --- Versions endpoints ---
+
+app.get("/api/agent/versions", (req, res) => {
+  const limit = parseInt(req.query.limit) || 30;
+  // Return merge commits if any, otherwise fall back to full log
+  const versions = getVersions(limit);
+  if (versions.length > 0) {
+    res.json(versions);
+  } else {
+    // No merge commits yet — show full log so versions tab isn't empty
+    res.json(getLog(limit));
+  }
+});
+
+app.post("/api/agent/versions/rollback", async (req, res) => {
+  const { commitHash } = req.body;
+  if (!commitHash) return res.status(400).json({ error: "commitHash is required" });
+  await acquireLock();
+  try {
+    res.json(rollbackMain(commitHash));
+  } finally {
+    releaseLock();
+  }
+});
+
+// --- Chat endpoint ---
+
 app.post("/api/agent/chat", async (req, res) => {
   const { message, context = {} } = req.body;
-  if (!message) {
-    return res.status(400).json({ error: "message is required" });
-  }
+  if (!message) return res.status(400).json({ error: "message is required" });
 
   // SSE headers
   res.writeHead(200, {
@@ -79,15 +163,20 @@ app.post("/api/agent/chat", async (req, res) => {
   sendEvent({ type: "status", content: "Thinking..." });
 
   try {
+    // Auto-create session branch if not active
+    if (!getSession()) {
+      const { branch } = createSession();
+      sendEvent({ type: "session_created", branch });
+    }
+
     // Resolve route context
     const routeContext = resolveContext(context.currentRoute || "");
 
-    // Build conversation history for context
+    // Build conversation history
     const history = (context.conversationHistory || [])
       .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
       .join("\n\n");
 
-    // Build the full prompt
     const prompt = [
       "## Current Page Context",
       `Route: ${context.currentRoute || "unknown"}`,
@@ -106,7 +195,7 @@ app.post("/api/agent/chat", async (req, res) => {
       .filter(Boolean)
       .join("\n");
 
-    // Spawn claude subprocess
+    // Spawn claude with DIGIT-MCP enabled
     const claude = spawn(
       "claude",
       [
@@ -118,18 +207,16 @@ app.post("/api/agent/chat", async (req, res) => {
         "--system-prompt-file",
         path.join(__dirname, "system-prompt.md"),
         "--mcp-config",
-        '{"mcpServers":{}}',
+        path.join(REPO_ROOT, ".mcp.json"),
         "--strict-mcp-config",
         "--allowedTools",
-        "Edit,Read,Write,Glob,Grep,Bash",
+        "Edit,Read,Write,Glob,Grep,Bash,mcp__DIGIT-MCP__pgr_search,mcp__DIGIT-MCP__pgr_create,mcp__DIGIT-MCP__mdms_search,mcp__DIGIT-MCP__user_search,mcp__DIGIT-MCP__workflow_process_search,mcp__DIGIT-MCP__health_check,mcp__DIGIT-MCP__db_counts,mcp__DIGIT-MCP__localization_search",
         "--max-turns",
-        "10",
+        "15",
       ],
       {
         cwd: REPO_ROOT,
-        env: {
-          ...process.env,
-        },
+        env: { ...process.env },
         stdio: ["pipe", "pipe", "pipe"],
       }
     );
@@ -140,7 +227,7 @@ app.post("/api/agent/chat", async (req, res) => {
     claude.stdout.on("data", (chunk) => {
       buffer += chunk.toString();
       const lines = buffer.split("\n");
-      buffer = lines.pop(); // keep incomplete line in buffer
+      buffer = lines.pop();
 
       for (const line of lines) {
         if (!line.trim()) continue;
@@ -150,7 +237,6 @@ app.post("/api/agent/chat", async (req, res) => {
           if (event.type === "assistant" && event.message) {
             for (const block of event.message.content || []) {
               if (block.type === "text") {
-                // Signal new text block so frontend can create new bubble
                 sendEvent({ type: "new_block", blockType: "text" });
                 fullResponse += block.text;
                 sendEvent({ type: "text", content: block.text });
@@ -172,7 +258,6 @@ app.post("/api/agent/chat", async (req, res) => {
               fullResponse += event.delta.text;
               sendEvent({ type: "text", content: event.delta.text });
             } else if (event.delta?.type === "thinking_delta") {
-              // Streaming thinking — send periodic status
               const snippet = (event.delta.thinking || "").slice(0, 80);
               if (snippet.length > 10) {
                 sendEvent({ type: "status", content: "Thinking...", detail: snippet });
@@ -202,14 +287,12 @@ app.post("/api/agent/chat", async (req, res) => {
     });
 
     claude.on("close", (code) => {
-      // Auto-commit any changes
-      const shortMsg =
-        message.length > 60 ? message.slice(0, 57) + "..." : message;
+      const shortMsg = message.length > 60 ? message.slice(0, 57) + "..." : message;
       const commitHash = autoCommit(`AI: ${shortMsg}`);
 
       sendEvent({
         type: "done",
-        commitHash: commitHash,
+        commitHash,
         exitCode: code,
       });
 
@@ -223,7 +306,6 @@ app.post("/api/agent/chat", async (req, res) => {
       releaseLock();
     });
 
-    // Handle client disconnect
     req.on("close", () => {
       claude.kill("SIGTERM");
       releaseLock();
@@ -235,38 +317,10 @@ app.post("/api/agent/chat", async (req, res) => {
   }
 });
 
-// GET /api/agent/versions — git log
-app.get("/api/agent/versions", (req, res) => {
-  const limit = parseInt(req.query.limit) || 30;
-  res.json(getLog(limit));
-});
+// --- Startup ---
 
-// POST /api/agent/save-version — create labeled git tag
-app.post("/api/agent/save-version", (req, res) => {
-  const { label, notes } = req.body;
-  if (!label) return res.status(400).json({ error: "label is required" });
-  res.json(saveVersion(label, notes));
-});
-
-// POST /api/agent/rollback — checkout a previous version
-app.post("/api/agent/rollback", (req, res) => {
-  const { commitHash } = req.body;
-  if (!commitHash)
-    return res.status(400).json({ error: "commitHash is required" });
-  res.json(rollback(commitHash));
-});
-
-// GET /api/agent/staged — unsaved changes since last tag
-app.get("/api/agent/staged", (req, res) => {
-  const { getStagedChanges } = require("./git-ops");
-  res.json(getStagedChanges());
-});
-
-// POST /api/agent/discard — discard all unsaved changes
-app.post("/api/agent/discard", (req, res) => {
-  const { discardChanges } = require("./git-ops");
-  res.json(discardChanges());
-});
+// Clean up orphan sessions from previous runs
+cleanupOrphans();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Agent backend running on http://0.0.0.0:${PORT}`);

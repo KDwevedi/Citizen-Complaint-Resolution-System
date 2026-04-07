@@ -1,10 +1,10 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import './chatWidget.css';
 import VersionPanel from './VersionPanel';
 
 const AGENT_API = '/api/agent';
 
-/** Lightweight markdown-ish renderer — handles **bold**, `code`, ```blocks```, headers, lists, newlines */
+/** Lightweight markdown renderer */
 function renderMarkdown(text: string) {
   if (!text) return null;
   const lines = text.split('\n');
@@ -13,91 +13,39 @@ function renderMarkdown(text: string) {
 
   while (i < lines.length) {
     const line = lines[i];
-
-    // Code block
     if (line.startsWith('```')) {
-      const lang = line.slice(3).trim();
       const codeLines: string[] = [];
       i++;
-      while (i < lines.length && !lines[i].startsWith('```')) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      i++; // skip closing ```
-      elements.push(
-        <pre key={elements.length} className="ccrs-code-block">
-          <code>{codeLines.join('\n')}</code>
-        </pre>
-      );
+      while (i < lines.length && !lines[i].startsWith('```')) { codeLines.push(lines[i]); i++; }
+      i++;
+      elements.push(<pre key={elements.length} className="ccrs-code-block"><code>{codeLines.join('\n')}</code></pre>);
       continue;
     }
-
-    // Header
-    if (line.startsWith('### ')) {
-      elements.push(<div key={elements.length} className="ccrs-md-h3">{inlineFormat(line.slice(4))}</div>);
-      i++; continue;
-    }
-    if (line.startsWith('## ')) {
-      elements.push(<div key={elements.length} className="ccrs-md-h2">{inlineFormat(line.slice(3))}</div>);
-      i++; continue;
-    }
-    if (line.startsWith('# ')) {
-      elements.push(<div key={elements.length} className="ccrs-md-h1">{inlineFormat(line.slice(2))}</div>);
-      i++; continue;
-    }
-
-    // List item
-    if (line.match(/^[-*] /)) {
-      elements.push(<div key={elements.length} className="ccrs-md-li">{inlineFormat(line.slice(2))}</div>);
-      i++; continue;
-    }
-
-    // Numbered list
-    if (line.match(/^\d+\. /)) {
-      const content = line.replace(/^\d+\.\s*/, '');
-      elements.push(<div key={elements.length} className="ccrs-md-li">{inlineFormat(content)}</div>);
-      i++; continue;
-    }
-
-    // Empty line = paragraph break
-    if (!line.trim()) {
-      elements.push(<div key={elements.length} className="ccrs-md-br" />);
-      i++; continue;
-    }
-
-    // Regular paragraph
-    elements.push(<div key={elements.length} className="ccrs-md-p">{inlineFormat(line)}</div>);
-    i++;
+    if (line.startsWith('### ')) { elements.push(<div key={elements.length} className="ccrs-md-h3">{inlineFmt(line.slice(4))}</div>); i++; continue; }
+    if (line.startsWith('## ')) { elements.push(<div key={elements.length} className="ccrs-md-h2">{inlineFmt(line.slice(3))}</div>); i++; continue; }
+    if (line.startsWith('# ')) { elements.push(<div key={elements.length} className="ccrs-md-h1">{inlineFmt(line.slice(2))}</div>); i++; continue; }
+    if (line.match(/^[-*] /)) { elements.push(<div key={elements.length} className="ccrs-md-li">{inlineFmt(line.slice(2))}</div>); i++; continue; }
+    if (line.match(/^\d+\. /)) { elements.push(<div key={elements.length} className="ccrs-md-li">{inlineFmt(line.replace(/^\d+\.\s*/, ''))}</div>); i++; continue; }
+    if (!line.trim()) { elements.push(<div key={elements.length} className="ccrs-md-br" />); i++; continue; }
+    elements.push(<div key={elements.length} className="ccrs-md-p">{inlineFmt(line)}</div>); i++;
   }
-
   return <>{elements}</>;
 }
 
-/** Inline formatting: **bold**, `code`, *italic* */
-function inlineFormat(text: string): (string | JSX.Element)[] {
+function inlineFmt(text: string): (string | JSX.Element)[] {
   const parts: (string | JSX.Element)[] = [];
-  // Split by inline code first, then bold, then italic
   const regex = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
-  let lastIndex = 0;
+  let lastIdx = 0;
   let match: RegExpExecArray | null;
-
   while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
+    if (match.index > lastIdx) parts.push(text.slice(lastIdx, match.index));
     const m = match[0];
-    if (m.startsWith('`')) {
-      parts.push(<code key={match.index} className="ccrs-inline-code">{m.slice(1, -1)}</code>);
-    } else if (m.startsWith('**')) {
-      parts.push(<strong key={match.index}>{m.slice(2, -2)}</strong>);
-    } else if (m.startsWith('*')) {
-      parts.push(<em key={match.index}>{m.slice(1, -1)}</em>);
-    }
-    lastIndex = match.index + m.length;
+    if (m.startsWith('`')) parts.push(<code key={match.index} className="ccrs-inline-code">{m.slice(1, -1)}</code>);
+    else if (m.startsWith('**')) parts.push(<strong key={match.index}>{m.slice(2, -2)}</strong>);
+    else if (m.startsWith('*')) parts.push(<em key={match.index}>{m.slice(1, -1)}</em>);
+    lastIdx = match.index + m.length;
   }
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
+  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
   return parts;
 }
 
@@ -106,33 +54,46 @@ interface Message {
   content: string;
   status?: string;
   commitHash?: string | null;
-  summary?: string;
+}
+
+interface SessionStatus {
+  active: boolean;
+  branch: string | null;
 }
 
 export default function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chat' | 'versions' | 'staged'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'changes' | 'versions'>('chat');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentTool, setCurrentTool] = useState<string | null>(null);
-  const [stagedChanges, setStagedChanges] = useState<Array<{ hash: string; message: string; date: string }>>([]);
+  const [session, setSession] = useState<SessionStatus>({ active: false, branch: null });
+  const [changes, setChanges] = useState<Array<{ hash: string; message: string; date: string }>>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
-  useEffect(() => { if (isOpen && inputRef.current) inputRef.current.focus(); }, [isOpen]);
+  useEffect(() => { if (isOpen && inputRef.current && activeTab === 'chat') inputRef.current.focus(); }, [isOpen, activeTab]);
 
-  // Fetch staged (unsaved) changes
-  const fetchStaged = useCallback(async () => {
+  const fetchSession = useCallback(async () => {
     try {
-      const res = await fetch(`${AGENT_API}/staged`);
+      const res = await fetch(`${AGENT_API}/session`);
       const data = await res.json();
-      setStagedChanges(data);
+      setSession({ active: data.active, branch: data.branch });
     } catch {}
   }, []);
 
-  useEffect(() => { if (isOpen) fetchStaged(); }, [isOpen, fetchStaged]);
+  const fetchChanges = useCallback(async () => {
+    try {
+      const res = await fetch(`${AGENT_API}/session/changes`);
+      setChanges(await res.json());
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) { fetchSession(); fetchChanges(); }
+  }, [isOpen, fetchSession, fetchChanges]);
 
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isStreaming) return;
@@ -143,7 +104,6 @@ export default function ChatWidget() {
 
     const newMessages = [...messages, { role: 'user', content: userMessage }];
     setMessages(newMessages);
-    // Track current block index — new_block events push new bubbles
     let currentIdx = newMessages.length;
     setMessages(prev => [...prev, { role: 'assistant', content: '', status: 'streaming' }]);
 
@@ -175,13 +135,12 @@ export default function ChatWidget() {
           if (!line.startsWith('data: ')) continue;
           try {
             const event = JSON.parse(line.slice(6));
-
-            if (event.type === 'new_block') {
-              // Start a new message bubble for each thinking→text→tool cycle
+            if (event.type === 'session_created') {
+              setSession({ active: true, branch: event.branch });
+            } else if (event.type === 'new_block') {
               const role = event.blockType === 'tool' ? 'tool' : 'assistant';
               const content = event.blockType === 'tool' ? (event.label || '') : '';
               setMessages(prev => {
-                // Remove empty trailing bubble if any
                 const cleaned = prev.filter((m, i) => i < currentIdx || m.content.trim());
                 currentIdx = cleaned.length;
                 return [...cleaned, { role, content, status: 'streaming' }];
@@ -189,9 +148,7 @@ export default function ChatWidget() {
             } else if (event.type === 'text') {
               setMessages(prev => {
                 const updated = [...prev];
-                if (updated[currentIdx]) {
-                  updated[currentIdx] = { ...updated[currentIdx], content: updated[currentIdx].content + event.content };
-                }
+                if (updated[currentIdx]) updated[currentIdx] = { ...updated[currentIdx], content: updated[currentIdx].content + event.content };
                 return updated;
               });
             } else if (event.type === 'tool_use') {
@@ -201,19 +158,16 @@ export default function ChatWidget() {
             } else if (event.type === 'done') {
               setMessages(prev => {
                 const updated = [...prev];
-                if (updated[currentIdx]) {
-                  updated[currentIdx] = { ...updated[currentIdx], status: 'done', commitHash: event.commitHash };
-                }
+                if (updated[currentIdx]) updated[currentIdx] = { ...updated[currentIdx], status: 'done', commitHash: event.commitHash };
                 return updated;
               });
               setCurrentTool(null);
-              fetchStaged();
+              fetchChanges();
+              fetchSession();
             } else if (event.type === 'error') {
               setMessages(prev => {
                 const updated = [...prev];
-                if (updated[currentIdx]) {
-                  updated[currentIdx] = { ...updated[currentIdx], content: updated[currentIdx].content + '\n\nError: ' + event.content, status: 'error' };
-                }
+                if (updated[currentIdx]) updated[currentIdx] = { ...updated[currentIdx], content: updated[currentIdx].content + '\n\nError: ' + event.content, status: 'error' };
                 return updated;
               });
             }
@@ -223,39 +177,55 @@ export default function ChatWidget() {
     } catch (err: any) {
       setMessages(prev => {
         const updated = [...prev];
-        updated[assistantIdx] = { role: 'assistant', content: 'Connection error: ' + err.message, status: 'error' };
+        if (updated[currentIdx]) updated[currentIdx] = { role: 'assistant', content: 'Connection error: ' + err.message, status: 'error' };
         return updated;
       });
     }
     setIsStreaming(false);
     setCurrentTool(null);
-  }, [input, isStreaming, messages, fetchStaged]);
+  }, [input, isStreaming, messages, fetchChanges, fetchSession]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
-  const handleSaveVersion = async () => {
+  const handleAccept = async () => {
     const label = prompt('Version label (e.g. v1-dashboard-redesign):');
     if (!label) return;
-    const notes = prompt('Notes (optional):') || '';
-    await fetch(`${AGENT_API}/save-version`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label, notes }) });
-    fetchStaged();
+    const res = await fetch(`${AGENT_API}/session/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) });
+    const data = await res.json();
+    if (data.success) {
+      setSession({ active: false, branch: null });
+      setChanges([]);
+      setMessages([]);
+      setActiveTab('versions');
+    } else {
+      alert('Failed: ' + data.error);
+    }
   };
 
   const handleDiscard = async () => {
-    if (!confirm('Discard all unsaved changes? This will revert to the last saved version.')) return;
-    await fetch(`${AGENT_API}/discard`, { method: 'POST' });
-    setTimeout(() => window.location.reload(), 1500);
+    if (!confirm('Discard all changes? This deletes the session branch entirely.')) return;
+    const res = await fetch(`${AGENT_API}/session/discard`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      setSession({ active: false, branch: null });
+      setChanges([]);
+      setMessages([]);
+      setTimeout(() => window.location.reload(), 1000);
+    } else {
+      alert('Failed: ' + data.error);
+    }
   };
 
-  const handleRollback = async (hash: string) => {
-    if (!confirm(`Rollback to ${hash}?`)) return;
-    await fetch(`${AGENT_API}/rollback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commitHash: hash }) });
-    setTimeout(() => window.location.reload(), 1500);
+  const handleSessionRollback = async (hash: string) => {
+    if (!confirm(`Reset session to ${hash}? Later changes will be lost.`)) return;
+    await fetch(`${AGENT_API}/session/rollback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commitHash: hash }) });
+    fetchChanges();
+    setTimeout(() => window.location.reload(), 1000);
   };
 
-  const stagedCount = stagedChanges.length;
+  const changeCount = changes.length;
 
   if (!isOpen) {
     return (
@@ -263,7 +233,8 @@ export default function ChatWidget() {
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
-        {stagedCount > 0 && <span className="ccrs-badge">{stagedCount}</span>}
+        {session.active && <span className="ccrs-session-dot" />}
+        {changeCount > 0 && <span className="ccrs-badge">{changeCount}</span>}
       </button>
     );
   }
@@ -272,32 +243,41 @@ export default function ChatWidget() {
     <div className="ccrs-chat-panel">
       <div className="ccrs-chat-header">
         <div className="ccrs-chat-tabs">
-          <button className={`ccrs-tab ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>Chat</button>
-          <button className={`ccrs-tab ${activeTab === 'staged' ? 'active' : ''}`} onClick={() => setActiveTab('staged')}>
-            Changes{stagedCount > 0 && <span className="ccrs-tab-count">{stagedCount}</span>}
+          <button className={`ccrs-tab ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
+            Chat
+            {session.active && <span className="ccrs-session-indicator" title="Editing session active" />}
+          </button>
+          <button className={`ccrs-tab ${activeTab === 'changes' ? 'active' : ''}`} onClick={() => { setActiveTab('changes'); fetchChanges(); }}>
+            Changes{changeCount > 0 && <span className="ccrs-tab-count">{changeCount}</span>}
           </button>
           <button className={`ccrs-tab ${activeTab === 'versions' ? 'active' : ''}`} onClick={() => setActiveTab('versions')}>Versions</button>
         </div>
         <button className="ccrs-chat-close" onClick={() => setIsOpen(false)}>&times;</button>
       </div>
 
-      {activeTab === 'versions' ? <VersionPanel /> : activeTab === 'staged' ? (
+      {activeTab === 'versions' ? (
+        <VersionPanel sessionActive={session.active} />
+      ) : activeTab === 'changes' ? (
         <div className="ccrs-staged">
-          <div className="ccrs-staged-actions">
-            <button className="ccrs-btn-save-staged" onClick={handleSaveVersion} disabled={stagedCount === 0}>Save Version</button>
-            <button className="ccrs-btn-discard" onClick={handleDiscard} disabled={stagedCount === 0}>Discard All</button>
-          </div>
-          {stagedCount === 0 ? (
-            <div className="ccrs-staged-empty">No unsaved changes. All changes are saved.</div>
+          {session.active && (
+            <div className="ccrs-staged-actions">
+              <button className="ccrs-btn-save-staged" onClick={handleAccept} disabled={changeCount === 0 || isStreaming}>Accept Changes</button>
+              <button className="ccrs-btn-discard" onClick={handleDiscard} disabled={isStreaming}>Discard All</button>
+            </div>
+          )}
+          {!session.active ? (
+            <div className="ccrs-staged-empty">No active session. Send a chat message to start editing.</div>
+          ) : changeCount === 0 ? (
+            <div className="ccrs-staged-empty">Session active but no changes yet.</div>
           ) : (
             <div className="ccrs-staged-list">
-              {stagedChanges.map((c, i) => (
+              {changes.map((c) => (
                 <div key={c.hash} className="ccrs-staged-item">
                   <div className="ccrs-staged-desc">{c.message.replace(/^AI:\s*/, '')}</div>
                   <div className="ccrs-staged-meta">
                     <code>{c.hash}</code>
                     <span>{new Date(c.date).toLocaleTimeString()}</span>
-                    <button className="ccrs-btn-rollback-sm" onClick={() => handleRollback(c.hash)}>rollback here</button>
+                    <button className="ccrs-btn-rollback-sm" onClick={() => handleSessionRollback(c.hash)} disabled={isStreaming}>reset here</button>
                   </div>
                 </div>
               ))}

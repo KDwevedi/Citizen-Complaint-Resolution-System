@@ -2,14 +2,19 @@ import { useState, useEffect, useCallback } from 'react';
 
 const AGENT_API = '/api/agent';
 
-export default function VersionPanel() {
-  const [versions, setVersions] = useState<Array<{ hash: string; fullHash: string; message: string; date: string; author: string; label: string | null }>>([]);
+interface Version {
+  hash: string;
+  fullHash: string;
+  message: string;
+  date: string;
+  author: string;
+  label: string | null;
+  isMerge?: boolean;
+}
+
+export default function VersionPanel({ sessionActive }: { sessionActive: boolean }) {
+  const [versions, setVersions] = useState<Version[]>([]);
   const [loading, setLoading] = useState(true);
-  const [stagedCount, setStagedCount] = useState(0);
-  const [showSaveModal, setShowSaveModal] = useState(false);
-  const [saveLabel, setSaveLabel] = useState('');
-  const [saveNotes, setSaveNotes] = useState('');
-  const [saving, setSaving] = useState(false);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
 
   const fetchVersions = useCallback(async () => {
@@ -20,28 +25,17 @@ export default function VersionPanel() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    fetchVersions();
-    fetch(`${AGENT_API}/staged`).then(r => r.json()).then(d => setStagedCount(d.length)).catch(() => {});
-  }, [fetchVersions]);
-
-  const handleSaveVersion = async () => {
-    if (!saveLabel.trim()) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`${AGENT_API}/save-version`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: saveLabel.trim(), notes: saveNotes.trim() }) });
-      const data = await res.json();
-      if (data.success) { setShowSaveModal(false); setSaveLabel(''); setSaveNotes(''); fetchVersions(); }
-      else alert('Failed: ' + data.error);
-    } catch (err: any) { alert('Error: ' + err.message); }
-    setSaving(false);
-  };
+  useEffect(() => { fetchVersions(); }, [fetchVersions]);
 
   const handleRollback = async (commitHash: string) => {
-    if (!window.confirm(`Rollback to ${commitHash}?`)) return;
+    if (!window.confirm(`Rollback to ${commitHash}? This resets the main branch.`)) return;
     setRollingBack(commitHash);
     try {
-      const res = await fetch(`${AGENT_API}/rollback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commitHash }) });
+      const res = await fetch(`${AGENT_API}/versions/rollback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ commitHash }),
+      });
       const data = await res.json();
       if (data.success) setTimeout(() => window.location.reload(), 1500);
       else { alert('Failed: ' + data.error); setRollingBack(null); }
@@ -52,31 +46,31 @@ export default function VersionPanel() {
 
   return (
     <div className="ccrs-versions">
-      <div className="ccrs-versions-header">
-        <button className="ccrs-btn-save" onClick={() => setShowSaveModal(true)} disabled={stagedCount === 0}>Save Current Version</button>
-      </div>
-      {showSaveModal && (
-        <div className="ccrs-save-modal">
-          <input className="ccrs-save-input" placeholder="Version label (e.g. v1-dashboard-redesign)" value={saveLabel} onChange={e => setSaveLabel(e.target.value)} autoFocus />
-          <textarea className="ccrs-save-notes" placeholder="Notes (optional)" value={saveNotes} onChange={e => setSaveNotes(e.target.value)} rows={2} />
-          <div className="ccrs-save-actions">
-            <button className="ccrs-btn-confirm" onClick={handleSaveVersion} disabled={saving || !saveLabel.trim()}>{saving ? 'Saving...' : 'Save'}</button>
-            <button className="ccrs-btn-cancel" onClick={() => setShowSaveModal(false)}>Cancel</button>
-          </div>
+      {sessionActive && (
+        <div className="ccrs-versions-notice">
+          Session active — accept or discard changes before rolling back versions.
         </div>
       )}
       <div className="ccrs-versions-list">
-        {versions.length === 0 && <div className="ccrs-versions-empty">No commits yet.</div>}
+        {versions.length === 0 && <div className="ccrs-versions-empty">No versions yet. Accept a session to create one.</div>}
         {versions.map((v, i) => (
           <div key={v.hash} className={`ccrs-version-item ${i === 0 ? 'ccrs-version-current' : ''}`}>
             <div className="ccrs-version-top">
               <code className="ccrs-version-hash">{v.hash}</code>
               {i === 0 && <span className="ccrs-version-current-badge">current</span>}
-              {v.label && <span className="ccrs-version-label">{v.label}</span>}
+              {v.label && v.label !== v.message && <span className="ccrs-version-label">{v.label}</span>}
               <span className="ccrs-version-date">{new Date(v.date).toLocaleString()}</span>
             </div>
-            <div className="ccrs-version-msg">{v.message}</div>
-            {i > 0 && <button className="ccrs-btn-rollback" onClick={() => handleRollback(v.hash)} disabled={rollingBack !== null}>{rollingBack === v.hash ? 'Rolling back...' : 'Rollback'}</button>}
+            <div className="ccrs-version-msg">{v.label || v.message}</div>
+            {i > 0 && (
+              <button
+                className="ccrs-btn-rollback"
+                onClick={() => handleRollback(v.hash)}
+                disabled={rollingBack !== null || sessionActive}
+              >
+                {rollingBack === v.hash ? 'Rolling back...' : 'Rollback'}
+              </button>
+            )}
           </div>
         ))}
       </div>

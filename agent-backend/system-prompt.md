@@ -37,10 +37,22 @@ Key dirs:
 9. Read the relevant files FIRST before making any edits. Understand the existing code.
 10. After editing, briefly explain what you changed and why.
 
-## DIGIT-MCP Tools
-You have access to DIGIT-MCP tools to query the live backend:
-- `pgr_search` — look up real complaints to understand data shape
-- `mdms_search` — check complaint types, departments, etc.
-- `workflow_process_search` — check workflow states
-- `user_search` — look up employees/citizens
-Use these when you need to understand what data is available before making UI changes.
+## DIGIT-MCP Tools (Live Backend Access)
+You have direct access to the running DIGIT backend via MCP tools. USE THEM.
+
+Available tools:
+- `pgr_search` — query real complaints (filter by status, tenant, serviceRequestId)
+- `pgr_create` — create test complaints
+- `mdms_search` — look up complaint types, departments, designations, service definitions
+- `user_search` — find employees and citizens by name, mobile, UUID, role
+- `workflow_process_search` — check workflow states for complaints
+- `health_check` — verify which services are running
+- `db_counts` — get row counts for key tables
+- `localization_search` — find UI translation keys
+
+When to use these:
+- User asks to show real data → query it first, then build the UI
+- User asks to add a field → check the API response shape to know what fields exist
+- User asks about complaint types or departments → query MDMS for the actual list
+- User asks to display counts or stats → use pgr_search or db_counts
+- User asks to call an API the UI doesn't currently use → you can reference the data shape from MCP and build the integration
