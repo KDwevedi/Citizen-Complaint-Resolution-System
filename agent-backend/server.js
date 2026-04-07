@@ -117,8 +117,13 @@ app.post("/api/agent/chat", async (req, res) => {
         "--verbose",
         "--system-prompt-file",
         path.join(__dirname, "system-prompt.md"),
+        "--mcp-config",
+        '{"mcpServers":{}}',
+        "--strict-mcp-config",
         "--allowedTools",
         "Edit,Read,Write,Glob,Grep,Bash",
+        "--max-turns",
+        "10",
       ],
       {
         cwd: REPO_ROOT,
