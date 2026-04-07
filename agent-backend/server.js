@@ -14,6 +14,24 @@ const PORT = 4100;
 const REPO_ROOT = "/opt/egov/ccrs-dashboard";
 // System prompt loaded via --system-prompt-file flag
 
+function describeToolAction(tool, file) {
+  const f = file ? ` ${file}` : "";
+  switch (tool) {
+    case "Read": return `Reading${f}`;
+    case "Edit": return `Editing${f}`;
+    case "Write": return `Writing${f}`;
+    case "Glob": return `Searching files${f}`;
+    case "Grep": return `Searching code${f}`;
+    case "Bash": return `Running command${f}`;
+    default:
+      if (tool.startsWith("mcp__DIGIT")) {
+        const mcpTool = tool.split("__").pop();
+        return `Querying ${mcpTool}`;
+      }
+      return tool || "Working...";
+  }
+}
+
 // Mutex: only one Claude subprocess at a time
 let busy = false;
 const queue = [];
@@ -125,28 +143,44 @@ app.post("/api/agent/chat", async (req, res) => {
           const event = JSON.parse(line);
 
           if (event.type === "assistant" && event.message) {
-            // Text content from assistant
             for (const block of event.message.content || []) {
               if (block.type === "text") {
                 fullResponse += block.text;
                 sendEvent({ type: "text", content: block.text });
+              } else if (block.type === "thinking") {
+                // Send thinking indicator
+                const snippet = (block.thinking || "").slice(0, 80);
+                sendEvent({ type: "status", content: "Thinking...", detail: snippet });
+              } else if (block.type === "tool_use") {
+                // Tool use from assistant message — extract file path
+                const toolName = block.name || "";
+                const input = block.input || {};
+                const filePath = input.file_path || input.path || input.pattern || input.command || "";
+                const shortPath = filePath.split("/").slice(-2).join("/");
+                const label = describeToolAction(toolName, shortPath);
+                sendEvent({ type: "tool_use", tool: toolName, label, file: shortPath });
               }
             }
           } else if (event.type === "content_block_delta") {
             if (event.delta?.type === "text_delta") {
               fullResponse += event.delta.text;
               sendEvent({ type: "text", content: event.delta.text });
+            } else if (event.delta?.type === "thinking_delta") {
+              // Streaming thinking — send periodic status
+              const snippet = (event.delta.thinking || "").slice(0, 80);
+              if (snippet.length > 10) {
+                sendEvent({ type: "status", content: "Thinking...", detail: snippet });
+              }
             }
           } else if (event.type === "content_block_start") {
             if (event.content_block?.type === "tool_use") {
-              sendEvent({
-                type: "tool_use",
-                tool: event.content_block.name,
-                status: "started",
-              });
+              const toolName = event.content_block.name || "";
+              sendEvent({ type: "tool_use", tool: toolName, label: describeToolAction(toolName, ""), file: "" });
+            } else if (event.content_block?.type === "thinking") {
+              sendEvent({ type: "status", content: "Thinking..." });
             }
           } else if (event.type === "result") {
-            // Final result — text already sent via assistant events, skip duplicate
+            // Final result — text already sent via assistant events
           }
         } catch {
           // Not JSON, skip

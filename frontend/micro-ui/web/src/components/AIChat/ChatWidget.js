@@ -91,9 +91,9 @@ const ChatWidget = () => {
                 return updated;
               });
             } else if (event.type === "tool_use") {
-              setCurrentTool(event.tool);
+              setCurrentTool(event.label || event.tool);
             } else if (event.type === "status") {
-              setCurrentTool(event.content);
+              setCurrentTool(event.detail ? `${event.content} ${event.detail}` : event.content);
             } else if (event.type === "done") {
               setMessages((prev) => {
                 const updated = [...prev];
@@ -207,13 +207,7 @@ const ChatWidget = () => {
           {(isStreaming || currentTool) && (
             <div className="ccrs-chat-status">
               <span className="ccrs-spinner" />
-              {currentTool
-                ? currentTool === "Edit" || currentTool === "Write"
-                  ? "Applying changes..."
-                  : currentTool === "Read" || currentTool === "Glob" || currentTool === "Grep"
-                  ? "Reading code..."
-                  : currentTool
-                : "Thinking..."}
+              <span className="ccrs-status-text">{currentTool || "Thinking..."}</span>
             </div>
           )}
 
