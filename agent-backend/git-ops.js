@@ -47,7 +47,8 @@ function getLog(limit = 30) {
 
 function rollback(commitHash) {
   try {
-    exec(`git checkout ${commitHash} -- frontend/ utilities/`);
+    // Only rollback source files, not config/build files
+    exec(`git checkout ${commitHash} -- frontend/micro-ui/web/micro-ui-internals/packages/modules/pgr/src/ utilities/crs_dataloader/ui-mockup/src/`);
     exec("git add -A");
     const status = exec("git status --porcelain");
     if (status) {
@@ -107,7 +108,7 @@ function discardChanges() {
     } catch {
       return { success: false, error: "No saved version to revert to" };
     }
-    exec(`git checkout ${lastTag} -- frontend/ utilities/`);
+    exec(`git checkout ${lastTag} -- frontend/micro-ui/web/micro-ui-internals/packages/modules/pgr/src/ utilities/crs_dataloader/ui-mockup/src/`);
     exec("git add -A");
     exec(`git commit -m "Discard: reverted to ${lastTag}"`);
     return { success: true, revertedTo: lastTag };
