@@ -150,19 +150,20 @@ app.post("/api/agent/chat", async (req, res) => {
           if (event.type === "assistant" && event.message) {
             for (const block of event.message.content || []) {
               if (block.type === "text") {
+                // Signal new text block so frontend can create new bubble
+                sendEvent({ type: "new_block", blockType: "text" });
                 fullResponse += block.text;
                 sendEvent({ type: "text", content: block.text });
               } else if (block.type === "thinking") {
-                // Send thinking indicator
-                const snippet = (block.thinking || "").slice(0, 80);
+                const snippet = (block.thinking || "").slice(0, 120);
                 sendEvent({ type: "status", content: "Thinking...", detail: snippet });
               } else if (block.type === "tool_use") {
-                // Tool use from assistant message — extract file path
                 const toolName = block.name || "";
                 const input = block.input || {};
                 const filePath = input.file_path || input.path || input.pattern || input.command || "";
                 const shortPath = filePath.split("/").slice(-2).join("/");
                 const label = describeToolAction(toolName, shortPath);
+                sendEvent({ type: "new_block", blockType: "tool", label });
                 sendEvent({ type: "tool_use", tool: toolName, label, file: shortPath });
               }
             }
@@ -253,6 +254,18 @@ app.post("/api/agent/rollback", (req, res) => {
   if (!commitHash)
     return res.status(400).json({ error: "commitHash is required" });
   res.json(rollback(commitHash));
+});
+
+// GET /api/agent/staged — unsaved changes since last tag
+app.get("/api/agent/staged", (req, res) => {
+  const { getStagedChanges } = require("./git-ops");
+  res.json(getStagedChanges());
+});
+
+// POST /api/agent/discard — discard all unsaved changes
+app.post("/api/agent/discard", (req, res) => {
+  const { discardChanges } = require("./git-ops");
+  res.json(discardChanges());
 });
 
 app.listen(PORT, "0.0.0.0", () => {

@@ -68,4 +68,51 @@ function saveVersion(label, notes) {
   }
 }
 
-module.exports = { autoCommit, getLog, rollback, saveVersion };
+function getStagedChanges() {
+  try {
+    // Find the latest tag (saved version)
+    let lastTag;
+    try {
+      lastTag = exec("git describe --tags --abbrev=0 2>/dev/null");
+    } catch {
+      // No tags yet — show all AI commits
+      lastTag = null;
+    }
+
+    const range = lastTag ? `${lastTag}..HEAD` : "HEAD~20..HEAD";
+    const raw = exec(
+      `git log ${range} --format='%h||%s||%ci' --grep="^AI:" 2>/dev/null`
+    );
+    if (!raw) return [];
+    return raw
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const [hash, message, date] = line.split("||");
+        return { hash, message, date };
+      });
+  } catch (e) {
+    console.error("getStagedChanges failed:", e.message);
+    return [];
+  }
+}
+
+function discardChanges() {
+  try {
+    // Find the latest tag
+    let lastTag;
+    try {
+      lastTag = exec("git describe --tags --abbrev=0 2>/dev/null");
+    } catch {
+      return { success: false, error: "No saved version to revert to" };
+    }
+    exec(`git checkout ${lastTag} -- frontend/ utilities/`);
+    exec("git add -A");
+    exec(`git commit -m "Discard: reverted to ${lastTag}"`);
+    return { success: true, revertedTo: lastTag };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+module.exports = { autoCommit, getLog, rollback, saveVersion, getStagedChanges, discardChanges };
