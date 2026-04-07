@@ -1,0 +1,227 @@
+const express = require("express");
+const cors = require("cors");
+const { spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const { resolveContext } = require("./context-map");
+const { autoCommit, getLog, rollback, saveVersion } = require("./git-ops");
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: "1mb" }));
+
+const PORT = 4100;
+const REPO_ROOT = "/opt/egov/ccrs-dashboard";
+const SYSTEM_PROMPT = fs.readFileSync(
+  path.join(__dirname, "system-prompt.md"),
+  "utf-8"
+);
+
+// Mutex: only one Claude subprocess at a time
+let busy = false;
+const queue = [];
+
+function acquireLock() {
+  return new Promise((resolve) => {
+    if (!busy) {
+      busy = true;
+      resolve();
+    } else {
+      queue.push(resolve);
+    }
+  });
+}
+
+function releaseLock() {
+  if (queue.length > 0) {
+    const next = queue.shift();
+    next();
+  } else {
+    busy = false;
+  }
+}
+
+// POST /api/agent/chat — main chat endpoint, returns SSE stream
+app.post("/api/agent/chat", async (req, res) => {
+  const { message, context = {} } = req.body;
+  if (!message) {
+    return res.status(400).json({ error: "message is required" });
+  }
+
+  // SSE headers
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+
+  const sendEvent = (data) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  await acquireLock();
+  sendEvent({ type: "status", content: "Thinking..." });
+
+  try {
+    // Resolve route context
+    const routeContext = resolveContext(context.currentRoute || "");
+
+    // Build conversation history for context
+    const history = (context.conversationHistory || [])
+      .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
+      .join("\n\n");
+
+    // Build the full prompt
+    const prompt = [
+      "## Current Page Context",
+      `Route: ${context.currentRoute || "unknown"}`,
+      `Page: ${routeContext.description}`,
+      "",
+      "## Relevant Files (focus your edits here)",
+      ...routeContext.relevantFiles.map((f) => `- ${f}`),
+      "",
+      "## Shared Files (for reference)",
+      ...routeContext.sharedFiles.map((f) => `- ${f}`),
+      "",
+      history ? `## Conversation History\n${history}\n` : "",
+      "## User Request",
+      message,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    // Spawn claude subprocess
+    const claude = spawn(
+      "claude",
+      [
+        "-p",
+        prompt,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--dangerously-skip-permissions",
+      ],
+      {
+        cwd: REPO_ROOT,
+        env: {
+          ...process.env,
+          CLAUDE_SYSTEM_PROMPT: SYSTEM_PROMPT,
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      }
+    );
+
+    let fullResponse = "";
+    let buffer = "";
+
+    claude.stdout.on("data", (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop(); // keep incomplete line in buffer
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+
+          if (event.type === "assistant" && event.message) {
+            // Text content from assistant
+            for (const block of event.message.content || []) {
+              if (block.type === "text") {
+                fullResponse += block.text;
+                sendEvent({ type: "text", content: block.text });
+              }
+            }
+          } else if (event.type === "content_block_delta") {
+            if (event.delta?.type === "text_delta") {
+              fullResponse += event.delta.text;
+              sendEvent({ type: "text", content: event.delta.text });
+            }
+          } else if (event.type === "content_block_start") {
+            if (event.content_block?.type === "tool_use") {
+              sendEvent({
+                type: "tool_use",
+                tool: event.content_block.name,
+                status: "started",
+              });
+            }
+          } else if (event.type === "result") {
+            // Final result
+            if (event.result) {
+              fullResponse += event.result;
+              sendEvent({ type: "text", content: event.result });
+            }
+          }
+        } catch {
+          // Not JSON, skip
+        }
+      }
+    });
+
+    claude.stderr.on("data", (chunk) => {
+      const msg = chunk.toString();
+      if (msg.includes("error") || msg.includes("Error")) {
+        console.error("claude stderr:", msg);
+      }
+    });
+
+    claude.on("close", (code) => {
+      // Auto-commit any changes
+      const shortMsg =
+        message.length > 60 ? message.slice(0, 57) + "..." : message;
+      const commitHash = autoCommit(`AI: ${shortMsg}`);
+
+      sendEvent({
+        type: "done",
+        commitHash: commitHash,
+        exitCode: code,
+      });
+
+      res.end();
+      releaseLock();
+    });
+
+    claude.on("error", (err) => {
+      sendEvent({ type: "error", content: err.message });
+      res.end();
+      releaseLock();
+    });
+
+    // Handle client disconnect
+    req.on("close", () => {
+      claude.kill("SIGTERM");
+      releaseLock();
+    });
+  } catch (err) {
+    sendEvent({ type: "error", content: err.message });
+    res.end();
+    releaseLock();
+  }
+});
+
+// GET /api/agent/versions — git log
+app.get("/api/agent/versions", (req, res) => {
+  const limit = parseInt(req.query.limit) || 30;
+  res.json(getLog(limit));
+});
+
+// POST /api/agent/save-version — create labeled git tag
+app.post("/api/agent/save-version", (req, res) => {
+  const { label, notes } = req.body;
+  if (!label) return res.status(400).json({ error: "label is required" });
+  res.json(saveVersion(label, notes));
+});
+
+// POST /api/agent/rollback — checkout a previous version
+app.post("/api/agent/rollback", (req, res) => {
+  const { commitHash } = req.body;
+  if (!commitHash)
+    return res.status(400).json({ error: "commitHash is required" });
+  res.json(rollback(commitHash));
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Agent backend running on http://0.0.0.0:${PORT}`);
+  console.log(`Repo root: ${REPO_ROOT}`);
+});

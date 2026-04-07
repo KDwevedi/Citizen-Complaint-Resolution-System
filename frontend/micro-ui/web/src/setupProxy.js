@@ -3,7 +3,15 @@ const createProxy = createProxyMiddleware({
   target: process.env.REACT_APP_PROXY_URL,
   changeOrigin: true,
 });
+const agentProxy = createProxyMiddleware({
+  target: "http://localhost:4100",
+  changeOrigin: true,
+});
 module.exports = function (app) {
+  // Agent backend proxy
+  app.use("/api/agent", agentProxy);
+
+  // DIGIT service proxies
   [
     "/egov-mdms-service",
     "/egov-location",
