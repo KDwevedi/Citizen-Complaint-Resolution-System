@@ -68,9 +68,10 @@ export default function VersionPanel() {
       <div className="ccrs-versions-list">
         {versions.length === 0 && <div className="ccrs-versions-empty">No commits yet.</div>}
         {versions.map((v, i) => (
-          <div key={v.hash} className="ccrs-version-item">
+          <div key={v.hash} className={`ccrs-version-item ${i === 0 ? 'ccrs-version-current' : ''}`}>
             <div className="ccrs-version-top">
               <code className="ccrs-version-hash">{v.hash}</code>
+              {i === 0 && <span className="ccrs-version-current-badge">current</span>}
               {v.label && <span className="ccrs-version-label">{v.label}</span>}
               <span className="ccrs-version-date">{new Date(v.date).toLocaleString()}</span>
             </div>

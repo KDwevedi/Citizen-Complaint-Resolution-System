@@ -325,6 +325,8 @@
 .ccrs-btn-cancel { padding: 6px 16px; background: #eee; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
 .ccrs-versions-list { display: flex; flex-direction: column; gap: 8px; }
 .ccrs-version-item { background: #f9f9f9; border: 1px solid #e8e8e8; border-radius: 6px; padding: 8px 10px; }
+.ccrs-version-current { background: #f0faf0; border-color: #b7e4b7; border-left: 3px solid #22863a; }
+.ccrs-version-current-badge { font-size: 10px; background: #22863a; color: #fff; padding: 1px 6px; border-radius: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
 .ccrs-version-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ccrs-version-hash { font-size: 12px; background: #e8e8e8; padding: 1px 6px; border-radius: 3px; color: #333; }
 .ccrs-version-label { font-size: 11px; background: #f47738; color: #fff; padding: 1px 6px; border-radius: 3px; font-weight: 500; }

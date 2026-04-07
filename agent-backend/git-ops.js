@@ -77,14 +77,22 @@ function getStagedChanges() {
     try {
       lastTag = exec("git describe --tags --abbrev=0 2>/dev/null");
     } catch {
-      // No tags yet — show all AI commits
       lastTag = null;
     }
 
-    const range = lastTag ? `${lastTag}..HEAD` : "HEAD~20..HEAD";
-    const raw = exec(
-      `git log ${range} --format='%h||%s||%ci' --grep="^AI:" 2>/dev/null`
-    );
+    // Show ALL commits since last tag (not just AI ones)
+    const range = lastTag ? `${lastTag}..HEAD` : "";
+    if (!range) {
+      // No tags — show recent commits
+      const raw = exec("git log --format='%h||%s||%ci' -10 2>/dev/null");
+      if (!raw) return [];
+      return raw.split("\n").filter(Boolean).map((line) => {
+        const [hash, message, date] = line.split("||");
+        return { hash, message, date };
+      });
+    }
+
+    const raw = exec(`git log ${range} --format='%h||%s||%ci' 2>/dev/null`);
     if (!raw) return [];
     return raw
       .split("\n")
