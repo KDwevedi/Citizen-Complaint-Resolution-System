@@ -12,10 +12,7 @@ app.use(express.json({ limit: "1mb" }));
 
 const PORT = 4100;
 const REPO_ROOT = "/opt/egov/ccrs-dashboard";
-const SYSTEM_PROMPT = fs.readFileSync(
-  path.join(__dirname, "system-prompt.md"),
-  "utf-8"
-);
+// System prompt loaded via --system-prompt-file flag
 
 // Mutex: only one Claude subprocess at a time
 let busy = false;
@@ -100,13 +97,15 @@ app.post("/api/agent/chat", async (req, res) => {
         "--output-format",
         "stream-json",
         "--verbose",
-        "--dangerously-skip-permissions",
+        "--system-prompt-file",
+        path.join(__dirname, "system-prompt.md"),
+        "--allowedTools",
+        "Edit,Read,Write,Glob,Grep,Bash",
       ],
       {
         cwd: REPO_ROOT,
         env: {
           ...process.env,
-          CLAUDE_SYSTEM_PROMPT: SYSTEM_PROMPT,
         },
         stdio: ["pipe", "pipe", "pipe"],
       }
@@ -147,11 +146,7 @@ app.post("/api/agent/chat", async (req, res) => {
               });
             }
           } else if (event.type === "result") {
-            // Final result
-            if (event.result) {
-              fullResponse += event.result;
-              sendEvent({ type: "text", content: event.result });
-            }
+            // Final result — text already sent via assistant events, skip duplicate
           }
         } catch {
           // Not JSON, skip
