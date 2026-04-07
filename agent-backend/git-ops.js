@@ -47,11 +47,12 @@ function getLog(limit = 30) {
 
 function rollback(commitHash) {
   try {
-    exec(
-      `git checkout ${commitHash} -- frontend/micro-ui/web/micro-ui-internals/packages/modules/pgr/src/`
-    );
-    exec("git add -A frontend/");
-    exec(`git commit -m "Rollback to ${commitHash}"`);
+    exec(`git checkout ${commitHash} -- frontend/ utilities/`);
+    exec("git add -A");
+    const status = exec("git status --porcelain");
+    if (status) {
+      exec(`git commit -m "Rollback to ${commitHash}"`);
+    }
     return { success: true, hash: exec("git rev-parse --short HEAD") };
   } catch (e) {
     return { success: false, error: e.message };

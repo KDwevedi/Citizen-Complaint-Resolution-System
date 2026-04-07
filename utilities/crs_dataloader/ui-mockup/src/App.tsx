@@ -151,8 +151,8 @@ function restoreApiClientFromStorage(): { isAuthenticated: boolean; user: AppSta
       apiClient.setTenantId(parsed.tenant);
 
       // Also configure the shared digitClient from the bridge
-      const restoredEnv = parsed.environment || 'http://46.225.143.82:18000';
-      const restoredTenant = parsed.tenant || 'pg.citya';
+      const restoredEnv = parsed.environment || 'https://api.egov.theflywheel.in';
+      const restoredTenant = parsed.tenant || 'statea';
       configureDigitClient(restoredEnv, parsed.authToken, {
         id: parsed.user.id ?? 0,
         uuid: parsed.user.uuid ?? '',
@@ -194,8 +194,8 @@ function App() {
     return {
       isAuthenticated: false,
       user: null,
-      environment: 'http://46.225.143.82:18000',
-      tenant: 'pg.citya',
+      environment: 'https://api.egov.theflywheel.in',
+      tenant: 'statea',
       mode: 'onboarding',
       currentPhase: 1,
       completedPhases: [],
