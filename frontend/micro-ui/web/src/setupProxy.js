@@ -34,6 +34,11 @@ module.exports = function (app) {
     "/muster-roll",
     "/service-request",
     "/mdms-v2",
+    "/access",
+    "/egov-indexer",
+    "/egov-enc-service",
+    "/boundary-service",
+    "/egov-url-shortening",
   ].forEach((location) =>
     app.use(location, createProxy)
   );
