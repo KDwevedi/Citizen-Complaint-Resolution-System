@@ -132,7 +132,7 @@ export default function ChatWidget() {
     } catch {}
   }, []);
 
-  useEffect(() => { if (isOpen && activeTab === 'staged') fetchStaged(); }, [isOpen, activeTab, fetchStaged]);
+  useEffect(() => { if (isOpen) fetchStaged(); }, [isOpen, fetchStaged]);
 
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isStreaming) return;

@@ -5,6 +5,7 @@ const AGENT_API = '/api/agent';
 export default function VersionPanel() {
   const [versions, setVersions] = useState<Array<{ hash: string; fullHash: string; message: string; date: string; author: string; label: string | null }>>([]);
   const [loading, setLoading] = useState(true);
+  const [stagedCount, setStagedCount] = useState(0);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveLabel, setSaveLabel] = useState('');
   const [saveNotes, setSaveNotes] = useState('');
@@ -19,7 +20,10 @@ export default function VersionPanel() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchVersions(); }, [fetchVersions]);
+  useEffect(() => {
+    fetchVersions();
+    fetch(`${AGENT_API}/staged`).then(r => r.json()).then(d => setStagedCount(d.length)).catch(() => {});
+  }, [fetchVersions]);
 
   const handleSaveVersion = async () => {
     if (!saveLabel.trim()) return;
@@ -49,7 +53,7 @@ export default function VersionPanel() {
   return (
     <div className="ccrs-versions">
       <div className="ccrs-versions-header">
-        <button className="ccrs-btn-save" onClick={() => setShowSaveModal(true)}>Save Current Version</button>
+        <button className="ccrs-btn-save" onClick={() => setShowSaveModal(true)} disabled={stagedCount === 0}>Save Current Version</button>
       </div>
       {showSaveModal && (
         <div className="ccrs-save-modal">

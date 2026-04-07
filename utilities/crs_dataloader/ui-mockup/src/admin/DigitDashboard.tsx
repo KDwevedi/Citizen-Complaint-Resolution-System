@@ -42,9 +42,9 @@ function ResourceCard({ resource }: { resource: string }) {
   return (
     <button
       onClick={() => navigate(`/manage/${resource}`)}
-      className="text-left w-full"
+      className="text-left w-full h-full"
     >
-      <DigitCard>
+      <DigitCard className="h-full mb-0">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
             <Icon className="w-6 h-6 text-primary" />
@@ -72,7 +72,7 @@ export function DigitDashboard() {
       <h1 className="text-2xl sm:text-3xl font-bold font-condensed text-foreground">
         DIGIT Management Studio
       </h1>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-stretch">
         {resources.map((resource) => (
           <ResourceCard key={resource} resource={resource} />
         ))}
