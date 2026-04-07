@@ -317,6 +317,36 @@ app.post("/api/agent/chat", async (req, res) => {
   }
 });
 
+// --- PGR Stats (direct DB query, bypasses broken PGR search API) ---
+
+app.get("/api/agent/pgr-stats", (req, res) => {
+  try {
+    const { execSync } = require("child_process");
+    const raw = execSync(
+      `docker exec docker-postgres psql -U egov -d egov -t -A -F'||' -c "
+        SELECT servicecode, applicationstatus, count(*) as cnt,
+               to_char(to_timestamp(createdtime/1000), 'YYYY-MM-DD') as dt
+        FROM eg_pgr_service_v2
+        WHERE tenantid = 'pg.citya'
+        GROUP BY servicecode, applicationstatus, dt
+        ORDER BY dt, cnt DESC;"`,
+      { encoding: "utf-8" }
+    ).trim();
+
+    if (!raw) return res.json({ complaints: [], total: 0 });
+
+    const rows = raw.split("\n").filter(Boolean).map((line) => {
+      const [serviceCode, status, count, date] = line.split("||");
+      return { serviceCode, status, count: parseInt(count), date };
+    });
+
+    const total = rows.reduce((s, r) => s + r.count, 0);
+    res.json({ complaints: rows, total });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- Startup ---
 
 // Clean up orphan sessions from previous runs

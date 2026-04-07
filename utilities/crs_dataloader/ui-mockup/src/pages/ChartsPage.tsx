@@ -5,20 +5,20 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { DigitCard } from '@/components/digit';
-import { apiClient } from '@/api/client';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-interface PGRService {
-  serviceRequestId: string;
+/** Shape returned by /api/agent/pgr-stats */
+interface StatsEntry {
   serviceCode: string;
-  applicationStatus: string;
-  auditDetails: { createdTime: number; lastModifiedTime: number };
-  tenantId: string;
+  status: string;
+  count: number;
+  date: string;
 }
 
-interface PGRServiceWrapper {
-  service: PGRService;
+interface StatsResponse {
+  complaints: StatsEntry[];
+  total: number;
 }
 
 interface StatusEntry  { name: string; value: number; color: string }
@@ -51,20 +51,27 @@ function prettifyServiceCode(code: string): string {
     .trim();
 }
 
-/** "MMM YY" label + epoch for sorting */
-function monthLabel(ts: number): { label: string; epoch: number } {
-  const d = new Date(ts);
-  const label = d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
-  // epoch = first millisecond of that month, for sorting
-  const epoch = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+/**
+ * Format a date string (YYYY-MM-DD, ISO, or epoch ms string) into "MMM YY"
+ * and return an epoch ms value for chronological sorting.
+ */
+function parseDateEntry(date: string): { label: string; epoch: number } {
+  const ms = isNaN(Number(date)) ? Date.parse(date) : Number(date);
+  const d  = new Date(isNaN(ms) ? date : ms);
+  const label = isNaN(d.getTime())
+    ? date  // fall back to raw string if unparseable
+    : d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+  const epoch = isNaN(d.getTime())
+    ? 0
+    : new Date(d.getFullYear(), d.getMonth(), 1).getTime();
   return { label, epoch };
 }
 
-function buildStatusData(wrappers: PGRServiceWrapper[]): StatusEntry[] {
+/** Pie — group by status, sum counts */
+function buildStatusData(entries: StatsEntry[]): StatusEntry[] {
   const counts: Record<string, number> = {};
-  for (const w of wrappers) {
-    const s = w.service.applicationStatus;
-    counts[s] = (counts[s] || 0) + 1;
+  for (const e of entries) {
+    counts[e.status] = (counts[e.status] || 0) + e.count;
   }
   return Object.entries(counts).map(([key, value], i) => ({
     name: key.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, c => c.toUpperCase()),
@@ -73,28 +80,29 @@ function buildStatusData(wrappers: PGRServiceWrapper[]): StatusEntry[] {
   }));
 }
 
-function buildServiceData(wrappers: PGRServiceWrapper[]): ServiceEntry[] {
+/** Bar — group by serviceCode, sum counts, prettify labels */
+function buildServiceData(entries: StatsEntry[]): ServiceEntry[] {
   const counts: Record<string, number> = {};
-  for (const w of wrappers) {
-    const s = w.service.serviceCode;
-    counts[s] = (counts[s] || 0) + 1;
+  for (const e of entries) {
+    counts[e.serviceCode] = (counts[e.serviceCode] || 0) + e.count;
   }
   return Object.entries(counts)
     .map(([code, count]) => ({ name: prettifyServiceCode(code), count }))
     .sort((a, b) => b.count - a.count);
 }
 
-function buildTrendData(wrappers: PGRServiceWrapper[]): TrendEntry[] {
-  const byMonth: Record<string, TrendEntry> = {};
-  for (const w of wrappers) {
-    const { label, epoch } = monthLabel(w.service.auditDetails.createdTime);
-    if (!byMonth[label]) byMonth[label] = { name: label, complaints: 0, resolved: 0, _ts: epoch };
-    byMonth[label].complaints += 1;
-    if (['RESOLVED', 'CLOSEDAFTERRESOLUTION'].includes(w.service.applicationStatus)) {
-      byMonth[label].resolved += 1;
+/** Line / Area — group by date, derive filed vs resolved totals */
+function buildTrendData(entries: StatsEntry[]): TrendEntry[] {
+  const byDate: Record<string, TrendEntry> = {};
+  for (const e of entries) {
+    const { label, epoch } = parseDateEntry(e.date);
+    if (!byDate[label]) byDate[label] = { name: label, complaints: 0, resolved: 0, _ts: epoch };
+    byDate[label].complaints += e.count;
+    if (['RESOLVED', 'CLOSEDAFTERRESOLUTION'].includes(e.status)) {
+      byDate[label].resolved += e.count;
     }
   }
-  return Object.values(byMonth).sort((a, b) => a._ts - b._ts);
+  return Object.values(byDate).sort((a, b) => a._ts - b._ts);
 }
 
 // ── Tooltip style (shared) ─────────────────────────────────────────────────
@@ -117,29 +125,17 @@ export default function ChartsPage() {
   const [trendData,   setTrendData]   = useState<TrendEntry[]>([]);
 
   useEffect(() => {
-    const baseUrl = apiClient.getEnvironment();
-    if (!baseUrl) {
-      setError('No DIGIT environment configured. Please log in first.');
-      setLoading(false);
-      return;
-    }
-
-    const url  = `${baseUrl}/pgr-services/v2/request/_search?tenantId=pg.citya`;
-    const { token } = apiClient.getAuth();
-    const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
-    fetch(url, { headers })
+    fetch('/api/agent/pgr-stats')
       .then(r => {
-        if (!r.ok) throw new Error(`PGR search failed: HTTP ${r.status}`);
+        if (!r.ok) throw new Error(`pgr-stats failed: HTTP ${r.status}`);
         return r.json();
       })
-      .then((data: { ServiceWrappers?: PGRServiceWrapper[] }) => {
-        const wrappers = data.ServiceWrappers ?? [];
-        setTotal(wrappers.length);
-        setStatusData(buildStatusData(wrappers));
-        setServiceData(buildServiceData(wrappers));
-        setTrendData(buildTrendData(wrappers));
+      .then((data: StatsResponse) => {
+        const entries = data.complaints ?? [];
+        setTotal(data.total ?? entries.reduce((s, e) => s + e.count, 0));
+        setStatusData(buildStatusData(entries));
+        setServiceData(buildServiceData(entries));
+        setTrendData(buildTrendData(entries));
         setLoading(false);
       })
       .catch((err: Error) => {
@@ -176,7 +172,7 @@ export default function ChartsPage() {
           Analytics Dashboard
         </h1>
         <p className="text-muted-foreground mt-1">
-          Live PGR data — <span className="font-medium text-foreground">{total}</span> complaint{total !== 1 ? 's' : ''} from <span className="font-medium text-foreground">pg.citya</span>
+          Live PGR data — <span className="font-medium text-foreground">{total}</span> complaint{total !== 1 ? 's' : ''} via <span className="font-medium text-foreground">/api/agent/pgr-stats</span>
         </p>
       </div>
 
