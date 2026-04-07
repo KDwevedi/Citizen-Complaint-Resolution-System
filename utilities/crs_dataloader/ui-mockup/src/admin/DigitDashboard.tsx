@@ -42,19 +42,19 @@ function ResourceCard({ resource }: { resource: string }) {
   return (
     <button
       onClick={() => navigate(`/manage/${resource}`)}
-      className="text-left w-full"
+      className="text-left w-full h-full"
     >
-      <DigitCard>
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
-            <Icon className="w-6 h-6 text-primary" />
-          </div>
-          <div>
-            <p className="text-2xl font-bold text-foreground">
-              {isPending ? '...' : (total ?? 0)}
-            </p>
-            <p className="text-sm text-muted-foreground">{label}</p>
-          </div>
+      <DigitCard className="h-full flex flex-col mb-0 max-w-none min-h-[120px]">
+        {/* Label + small icon — top left */}
+        <div className="flex items-center gap-1.5">
+          <Icon className="w-4 h-4 text-primary shrink-0" />
+          <p className="text-sm font-medium text-muted-foreground leading-tight">{label}</p>
+        </div>
+        {/* Number — centered in remaining space */}
+        <div className="flex-1 flex items-center justify-center mt-2">
+          <p className="text-4xl font-bold text-foreground tabular-nums">
+            {isPending ? '—' : (total ?? 0)}
+          </p>
         </div>
       </DigitCard>
     </button>
@@ -72,7 +72,7 @@ export function DigitDashboard() {
       <h1 className="text-2xl sm:text-3xl font-bold font-condensed text-foreground">
         DIGIT Management Studio
       </h1>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-stretch">
         {resources.map((resource) => (
           <ResourceCard key={resource} resource={resource} />
         ))}

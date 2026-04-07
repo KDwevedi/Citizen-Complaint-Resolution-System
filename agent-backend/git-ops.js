@@ -7,8 +7,8 @@ function exec(cmd) {
 
 function autoCommit(message) {
   try {
-    exec("git add -A frontend/");
-    const status = exec("git status --porcelain frontend/");
+    exec("git add -A frontend/ utilities/");
+    const status = exec("git status --porcelain frontend/ utilities/");
     if (!status) return null;
     const safe = message.replace(/"/g, '\\"').replace(/\n/g, " ");
     exec(`git commit -m "${safe}"`);
