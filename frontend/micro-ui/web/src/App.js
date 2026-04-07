@@ -15,7 +15,7 @@ import { initPGRComponents,PGRReducers, } from "@egovernments/digit-ui-module-cc
 import { Loader } from "@egovernments/digit-ui-components";
 import { initWorkbenchComponents } from "@egovernments/digit-ui-module-workbench";
 import { initHRMSComponents } from "@egovernments/digit-ui-module-hrms";
-import ChatWidget from "./micro-ui-internals/packages/modules/pgr/src/components/AIChat/ChatWidget";
+import ChatWidget from "./components/AIChat/ChatWidget";
 
 window.contextPath = window?.globalConfigs?.getConfig("CONTEXT_PATH");
 
