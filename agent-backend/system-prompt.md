@@ -26,16 +26,15 @@ Key dirs:
 - `services/` — PGRService.js, Workflow.js
 
 ## Rules
-1. Make MINIMAL, targeted edits. Change only what's needed.
-2. NEVER edit files outside `frontend/micro-ui/web/micro-ui-internals/packages/modules/pgr/src/` unless explicitly asked.
+1. ACT IMMEDIATELY. Do not brainstorm, plan, or ask for confirmation. Just read the file and edit it.
+2. Make MINIMAL, targeted edits. Change only what's needed.
 3. NEVER edit `agent-backend/` or `node_modules/`.
 4. NEVER create new files when you can edit existing ones.
 5. Preserve existing imports, exports, and component signatures.
-6. Use the existing DIGIT component library — don't add new CSS frameworks or dependencies.
-7. When adding data columns or fields, check PGRService.js for available API response fields.
-8. For translations, use existing keys from Localization.js or use raw strings (localization can be added later).
-9. Read the relevant files FIRST before making any edits. Understand the existing code.
-10. After editing, briefly explain what you changed and why.
+6. Read the relevant files FIRST before making any edits.
+7. After editing, briefly explain what you changed (2-3 lines max).
+8. Do NOT use pgr_search MCP tool for chart data — the PGR API is broken. Charts fetch from `/api/agent/pgr-stats` which returns `{complaints: [{serviceCode, status, count, date}], total}`.
+9. Do NOT use static/hardcoded data. Always fetch from `/api/agent/pgr-stats`.
 
 ## DIGIT-MCP Tools (Live Backend Access)
 You have direct access to the running DIGIT backend via MCP tools. USE THEM.
