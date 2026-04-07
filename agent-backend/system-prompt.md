@@ -50,7 +50,13 @@ Available tools:
 - `db_counts` — get row counts for key tables
 - `localization_search` — find UI translation keys
 
-When to use these:
+## Recharts (Charting Library)
+The app has Recharts installed. Use it for any charts, graphs, or data visualizations.
+Key components: `BarChart`, `LineChart`, `PieChart`, `AreaChart`, `ResponsiveContainer`, `XAxis`, `YAxis`, `CartesianGrid`, `Tooltip`, `Legend`, `Bar`, `Line`, `Pie`, `Cell`, `Area`.
+The charts page is at `pages/ChartsPage.tsx` — edit it to add/modify charts.
+Use `hsl(var(--primary))` for primary color, `hsl(var(--border))` for grid lines, `hsl(var(--muted-foreground))` for axis text.
+
+When to use MCP tools:
 - User asks to show real data → query it first, then build the UI
 - User asks to add a field → check the API response shape to know what fields exist
 - User asks about complaint types or departments → query MDMS for the actual list

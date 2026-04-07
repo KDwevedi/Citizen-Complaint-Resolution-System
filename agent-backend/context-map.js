@@ -44,6 +44,10 @@ const ROUTE_COMPONENTS = {
     description: "Users CRUD list",
     files: [CFG_SRC + "/resources/users/index.tsx", CFG_SRC + "/admin/DigitList.tsx"],
   },
+  "/manage/charts": {
+    description: "Analytics dashboard with Recharts — bar, line, pie, area charts showing DIGIT data",
+    files: [CFG_SRC + "/pages/ChartsPage.tsx"],
+  },
   "/manage/advanced": {
     description: "Advanced settings page",
     files: [CFG_SRC + "/resources/advanced/AdvancedPage.tsx"],

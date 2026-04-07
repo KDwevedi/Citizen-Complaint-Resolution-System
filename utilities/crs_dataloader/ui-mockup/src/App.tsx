@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useState, createContext, useContext, useEffect, useCallback } from 'react';
 import Layout from './components/layout/Layout';
 import LoginPage from './pages/LoginPage';
+import ChartsPage from './pages/ChartsPage';
 import Phase1Page from './pages/Phase1Page';
 import Phase2Page from './pages/Phase2Page';
 import Phase3Page from './pages/Phase3Page';
@@ -120,6 +121,7 @@ function ManagementAdmin() {
         {/* Custom routes */}
         <CustomRoutes>
           <Route path="/advanced" element={<AdvancedPage />} />
+          <Route path="/charts" element={<ChartsPage />} />
         </CustomRoutes>
       </CoreAdminUI>
     </CoreAdminContext>
