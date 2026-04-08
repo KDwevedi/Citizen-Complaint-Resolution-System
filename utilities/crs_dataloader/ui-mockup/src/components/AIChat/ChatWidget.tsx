@@ -54,12 +54,18 @@ interface ChatSession { id: string; title: string; messageCount: number; lastAct
 interface SessionStatus { active: boolean; branch: string | null; }
 
 export default function ChatWidget() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [mainTab, setMainTab] = useState<'chat' | 'changes' | 'versions'>('chat');
+  const [isOpen, setIsOpen] = useState(() => {
+    try { return localStorage.getItem('ccrs-chat-open') === 'true'; } catch { return false; }
+  });
+  const [mainTab, setMainTab] = useState<'chat' | 'changes' | 'versions'>(() => {
+    try { return (localStorage.getItem('ccrs-chat-tab') as any) || 'chat'; } catch { return 'chat'; }
+  });
 
   // Multi-chat state
   const [chatList, setChatList] = useState<ChatSession[]>([]);
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [activeChatId, setActiveChatId] = useState<string | null>(() => {
+    try { return localStorage.getItem('ccrs-active-chat'); } catch { return null; }
+  });
   const [messages, setMessages] = useState<Message[]>([]);
 
   const [input, setInput] = useState('');
@@ -72,6 +78,10 @@ export default function ChatWidget() {
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => { if (isOpen && inputRef.current && mainTab === 'chat') inputRef.current.focus(); }, [isOpen, mainTab]);
+
+  // Persist open/tab state
+  useEffect(() => { try { localStorage.setItem('ccrs-chat-open', String(isOpen)); } catch {} }, [isOpen]);
+  useEffect(() => { try { localStorage.setItem('ccrs-chat-tab', mainTab); } catch {} }, [mainTab]);
 
   // --- Data fetching ---
   const fetchSession = useCallback(async () => {
@@ -91,20 +101,26 @@ export default function ChatWidget() {
       const r = await fetch(`${AGENT_API}/chats/${chatId}`);
       const data = await r.json();
       setActiveChatId(chatId);
+      localStorage.setItem('ccrs-active-chat', chatId);
       setMessages((data.messages || []).map((m: any) => ({
-        role: m.role, content: m.content, commitHash: m.commitHash || null, status: 'done',
+        role: m.role,
+        content: m.content || '',
+        commitHash: m.commitHash || null,
+        status: 'done',
       })));
     } catch {}
   }, []);
 
-  // On open: load chat list, session, changes
+  // On mount + open: load chat list, session, changes, restore active chat
   useEffect(() => {
     if (isOpen) {
       fetchSession();
       fetchChanges();
       fetchChatList().then(() => {
-        // Auto-select most recent chat if none active
-        if (!activeChatId) {
+        const savedId = activeChatId || localStorage.getItem('ccrs-active-chat');
+        if (savedId) {
+          loadChat(savedId);
+        } else {
           fetch(`${AGENT_API}/chats`).then(r => r.json()).then((list: ChatSession[]) => {
             if (list.length > 0) loadChat(list[0].id);
           }).catch(() => {});
@@ -119,6 +135,7 @@ export default function ChatWidget() {
       const chat = await r.json();
       setChatList(prev => [{ id: chat.id, title: chat.title, messageCount: 0, lastActivity: chat.lastActivity }, ...prev]);
       setActiveChatId(chat.id);
+      localStorage.setItem('ccrs-active-chat', chat.id);
       setMessages([]);
     } catch {}
   };
@@ -129,8 +146,8 @@ export default function ChatWidget() {
     setChatList(prev => prev.filter(c => c.id !== chatId));
     if (activeChatId === chatId) {
       const remaining = chatList.filter(c => c.id !== chatId);
-      if (remaining.length > 0) loadChat(remaining[0].id);
-      else { setActiveChatId(null); setMessages([]); }
+      if (remaining.length > 0) { loadChat(remaining[0].id); }
+      else { setActiveChatId(null); localStorage.removeItem('ccrs-active-chat'); setMessages([]); }
     }
   };
 
