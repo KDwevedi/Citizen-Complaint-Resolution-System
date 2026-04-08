@@ -96,6 +96,9 @@ export default function ChatWidget() {
     try { const r = await fetch(`${AGENT_API}/chats`); setChatList(await r.json()); } catch {}
   }, []);
 
+  const lastEventIdRef = useRef(0);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const loadChat = useCallback(async (chatId: string) => {
     try {
       const r = await fetch(`${AGENT_API}/chats/${chatId}`);
@@ -111,7 +114,63 @@ export default function ChatWidget() {
     } catch {}
   }, []);
 
-  // On mount + open: load chat list, session, changes, restore active chat
+  // Poll for events after reconnect (HMR reload)
+  const startPolling = useCallback(() => {
+    if (pollTimerRef.current) return;
+    setIsStreaming(true);
+    pollTimerRef.current = setInterval(async () => {
+      try {
+        const r = await fetch(`${AGENT_API}/stream/events?since=${lastEventIdRef.current}`);
+        const data = await r.json();
+        for (const evt of data.events) {
+          lastEventIdRef.current = evt.id;
+          if (evt.type === 'new_block') {
+            const role = evt.blockType === 'tool' ? 'tool' : 'assistant';
+            const content = evt.blockType === 'tool' ? (evt.label || '') : '';
+            setMessages(prev => [...prev, { role, content, status: 'streaming' }]);
+          } else if (evt.type === 'text') {
+            setMessages(prev => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last && last.status === 'streaming') {
+                updated[updated.length - 1] = { ...last, content: last.content + evt.content };
+              }
+              return updated;
+            });
+          } else if (evt.type === 'tool_use') {
+            setCurrentTool(evt.label || evt.tool);
+          } else if (evt.type === 'status') {
+            setCurrentTool(evt.detail ? `${evt.content} ${evt.detail}` : evt.content);
+          } else if (evt.type === 'done') {
+            setMessages(prev => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last) updated[updated.length - 1] = { ...last, status: 'done', commitHash: evt.commitHash };
+              return updated;
+            });
+            setCurrentTool(null);
+            setIsStreaming(false);
+            fetchChanges();
+            fetchSession();
+            fetchChatList();
+          }
+        }
+        if (data.done && pollTimerRef.current) {
+          clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+          setIsStreaming(false);
+          setCurrentTool(null);
+        }
+      } catch {}
+    }, 500);
+  }, [fetchChanges, fetchSession, fetchChatList]);
+
+  // Stop polling on unmount
+  useEffect(() => {
+    return () => { if (pollTimerRef.current) clearInterval(pollTimerRef.current); };
+  }, []);
+
+  // On mount + open: load chat, then check if stream is active and catch up
   useEffect(() => {
     if (isOpen) {
       fetchSession();
@@ -119,7 +178,15 @@ export default function ChatWidget() {
       fetchChatList().then(() => {
         const savedId = activeChatId || localStorage.getItem('ccrs-active-chat');
         if (savedId) {
-          loadChat(savedId);
+          loadChat(savedId).then(() => {
+            // Check if there's an active stream to catch up on
+            fetch(`${AGENT_API}/stream/status`).then(r => r.json()).then(status => {
+              if (status.active) {
+                lastEventIdRef.current = 0; // get all buffered events
+                startPolling();
+              }
+            }).catch(() => {});
+          });
         } else {
           fetch(`${AGENT_API}/chats`).then(r => r.json()).then((list: ChatSession[]) => {
             if (list.length > 0) loadChat(list[0].id);

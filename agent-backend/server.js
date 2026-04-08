@@ -48,6 +48,24 @@ function describeToolAction(tool, file) {
 let busy = false;
 const queue = [];
 
+// Event buffer — survives SSE disconnects, client polls to catch up
+let eventBuffer = [];   // { id: number, data: object }
+let eventSeq = 0;
+let streamActive = false;
+
+function bufferEvent(data) {
+  eventSeq++;
+  eventBuffer.push({ id: eventSeq, data, ts: Date.now() });
+  // Keep last 500 events max
+  if (eventBuffer.length > 500) eventBuffer = eventBuffer.slice(-500);
+}
+
+function clearEventBuffer() {
+  eventBuffer = [];
+  eventSeq = 0;
+  streamActive = false;
+}
+
 function acquireLock() {
   return new Promise((resolve) => {
     if (!busy) {
@@ -164,6 +182,18 @@ app.delete("/api/agent/chats/:id", (req, res) => {
   res.json({ success: true });
 });
 
+// --- Event polling (client catches up after reload) ---
+
+app.get("/api/agent/stream/status", (req, res) => {
+  res.json({ active: streamActive, eventCount: eventBuffer.length, lastEventId: eventSeq });
+});
+
+app.get("/api/agent/stream/events", (req, res) => {
+  const since = parseInt(req.query.since) || 0;
+  const events = eventBuffer.filter(e => e.id > since);
+  res.json({ events: events.map(e => ({ id: e.id, ...e.data })), done: !streamActive });
+});
+
 // --- Chat endpoint ---
 
 app.post("/api/agent/chat", async (req, res) => {
@@ -184,10 +214,13 @@ app.post("/api/agent/chat", async (req, res) => {
   });
 
   const sendEvent = (data) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    bufferEvent(data);
+    try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {}
   };
 
   await acquireLock();
+  clearEventBuffer();
+  streamActive = true;
   sendEvent({ type: "status", content: "Thinking..." });
 
   try {
@@ -251,6 +284,8 @@ app.post("/api/agent/chat", async (req, res) => {
 
     let fullResponse = "";
     let buffer = "";
+    // Collect all blocks for persistence (tool calls + text)
+    const chatBlocks = [];
 
     claude.stdout.on("data", (chunk) => {
       buffer += chunk.toString();
@@ -267,6 +302,7 @@ app.post("/api/agent/chat", async (req, res) => {
               if (block.type === "text") {
                 sendEvent({ type: "new_block", blockType: "text" });
                 fullResponse += block.text;
+                chatBlocks.push({ role: "assistant", content: block.text });
                 sendEvent({ type: "text", content: block.text });
               } else if (block.type === "thinking") {
                 const snippet = (block.thinking || "").slice(0, 120);
@@ -277,6 +313,7 @@ app.post("/api/agent/chat", async (req, res) => {
                 const filePath = input.file_path || input.path || input.pattern || input.command || "";
                 const shortPath = filePath.split("/").slice(-2).join("/");
                 const label = describeToolAction(toolName, shortPath);
+                chatBlocks.push({ role: "tool", content: label });
                 sendEvent({ type: "new_block", blockType: "tool", label });
                 sendEvent({ type: "tool_use", tool: toolName, label, file: shortPath });
               }
@@ -299,7 +336,10 @@ app.post("/api/agent/chat", async (req, res) => {
               sendEvent({ type: "status", content: "Thinking..." });
             }
           } else if (event.type === "result") {
-            // Final result — text already sent via assistant events
+            // Capture the final complete result for persistence
+            if (event.result && !fullResponse) {
+              fullResponse = event.result;
+            }
           }
         } catch {
           // Not JSON, skip
@@ -318,14 +358,26 @@ app.post("/api/agent/chat", async (req, res) => {
       const shortMsg = message.length > 60 ? message.slice(0, 57) + "..." : message;
       const commitHash = autoCommit(`AI: ${shortMsg}`);
 
-      // Persist assistant response
-      if (chatId && fullResponse) {
-        appendMessage(chatId, {
-          role: "assistant",
-          content: fullResponse,
-          commitHash,
-          timestamp: Date.now(),
-        });
+      // Persist all blocks (tool calls + text) as individual messages
+      if (chatId) {
+        if (chatBlocks.length > 0) {
+          for (const block of chatBlocks) {
+            appendMessage(chatId, {
+              ...block,
+              timestamp: Date.now(),
+            });
+          }
+          // Tag the last block with commitHash
+          if (commitHash) {
+            const chat = require("./chat-store").getChat(chatId);
+            if (chat && chat.messages.length > 0) {
+              chat.messages[chat.messages.length - 1].commitHash = commitHash;
+              require("./chat-store").updateChat(chatId, { messages: chat.messages });
+            }
+          }
+        } else if (fullResponse) {
+          appendMessage(chatId, { role: "assistant", content: fullResponse, commitHash, timestamp: Date.now() });
+        }
       }
 
       sendEvent({
@@ -334,6 +386,7 @@ app.post("/api/agent/chat", async (req, res) => {
         exitCode: code,
       });
 
+      streamActive = false;
       res.end();
       releaseLock();
     });
