@@ -358,7 +358,7 @@ export default function ChatWidget() {
             {messages.map((msg, i) => (
               <div key={i} className={`ccrs-msg ccrs-msg-${msg.role}`}>
                 <div className="ccrs-msg-content">
-                  {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.content}
+                  {msg.role === 'assistant' ? renderMarkdown(msg.content) : msg.role === 'user' ? msg.content.split('\n').map((line, j) => <span key={j}>{j > 0 && <br />}{line}</span>) : msg.content}
                   {!msg.content && msg.status === 'streaming' && <span className="ccrs-typing">...</span>}
                 </div>
                 {msg.commitHash && <div className="ccrs-msg-commit">Changes applied [{msg.commitHash}]</div>}
