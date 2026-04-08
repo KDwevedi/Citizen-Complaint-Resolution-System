@@ -102,6 +102,13 @@ export default function ChatWidget() {
   const loadChat = useCallback(async (chatId: string) => {
     try {
       const r = await fetch(`${AGENT_API}/chats/${chatId}`);
+      if (!r.ok) {
+        // Chat was deleted — clear stale reference, create fresh
+        localStorage.removeItem('ccrs-active-chat');
+        setActiveChatId(null);
+        setMessages([]);
+        return;
+      }
       const data = await r.json();
       setActiveChatId(chatId);
       localStorage.setItem('ccrs-active-chat', chatId);
@@ -111,7 +118,11 @@ export default function ChatWidget() {
         commitHash: m.commitHash || null,
         status: 'done',
       })));
-    } catch {}
+    } catch {
+      localStorage.removeItem('ccrs-active-chat');
+      setActiveChatId(null);
+      setMessages([]);
+    }
   }, []);
 
   // Poll for events after reconnect (HMR reload)
@@ -175,37 +186,46 @@ export default function ChatWidget() {
     return () => { if (pollTimerRef.current) clearInterval(pollTimerRef.current); };
   }, []);
 
-  // On mount + open: load chat, then check if stream is active and catch up
+  // On mount + open: restore chat and check for active stream
   useEffect(() => {
-    if (isOpen) {
-      fetchSession();
-      fetchChanges();
-      fetchChatList().then(() => {
-        const savedId = activeChatId || localStorage.getItem('ccrs-active-chat');
-        if (savedId) {
-          loadChat(savedId).then(async () => {
-            // Check if there's an active stream to catch up on
-            try {
-              const statusRes = await fetch(`${AGENT_API}/stream/status`);
-              const status = await statusRes.json();
-              if (status.active) {
-                // Get persisted messages as the base for polling
-                const chatRes = await fetch(`${AGENT_API}/chats/${savedId}`);
-                const chatData = await chatRes.json();
-                const base = (chatData.messages || []).map((m: any) => ({
-                  role: m.role, content: m.content || '', commitHash: m.commitHash || null, status: 'done' as const,
-                }));
-                startPolling(base);
-              }
-            } catch {}
-          });
-        } else {
-          fetch(`${AGENT_API}/chats`).then(r => r.json()).then((list: ChatSession[]) => {
-            if (list.length > 0) loadChat(list[0].id);
-          }).catch(() => {});
+    if (!isOpen) return;
+
+    fetchSession();
+    fetchChanges();
+    fetchChatList();
+
+    const savedId = activeChatId || localStorage.getItem('ccrs-active-chat');
+
+    const restore = async () => {
+      // Load the saved chat or the most recent one
+      let chatToLoad = savedId;
+      if (!chatToLoad) {
+        try {
+          const listRes = await fetch(`${AGENT_API}/chats`);
+          const list = await listRes.json();
+          if (list.length > 0) chatToLoad = list[0].id;
+        } catch {}
+      }
+      if (chatToLoad) {
+        await loadChat(chatToLoad);
+      }
+
+      // Check if there's an active stream to catch up on
+      try {
+        const statusRes = await fetch(`${AGENT_API}/stream/status`);
+        const status = await statusRes.json();
+        if (status.active && chatToLoad) {
+          const chatRes = await fetch(`${AGENT_API}/chats/${chatToLoad}`);
+          const chatData = await chatRes.json();
+          const base = (chatData.messages || []).map((m: any) => ({
+            role: m.role, content: m.content || '', commitHash: m.commitHash || null, status: 'done' as const,
+          }));
+          startPolling(base);
         }
-      });
-    }
+      } catch {}
+    };
+
+    restore();
   }, [isOpen]); // eslint-disable-line
 
   const createNewChat = async () => {
