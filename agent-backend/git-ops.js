@@ -146,9 +146,9 @@ function discardSession() {
 
 function getVersions(limit = 30) {
   try {
-    // Get merge commits on main (accepted sessions)
+    // Only show our "Accept:" merge commits, not upstream merges
     const raw = exec(
-      `git log ${MAIN_BRANCH} --merges --first-parent --format='%h||%H||%s||%ci||%an' -n ${limit} 2>/dev/null`
+      `git log ${MAIN_BRANCH} --merges --first-parent --grep="^Accept:" --format='%h||%H||%s||%ci||%an' -n ${limit} 2>/dev/null`
     );
     if (!raw) return [];
     return raw
@@ -156,10 +156,7 @@ function getVersions(limit = 30) {
       .filter(Boolean)
       .map((line) => {
         const [hash, fullHash, message, date, author] = line.split("||");
-        // Extract label from "Accept: <label>" format
-        const label = message.startsWith("Accept: ")
-          ? message.slice(8)
-          : message;
+        const label = message.startsWith("Accept: ") ? message.slice(8) : message;
         return { hash, fullHash, message, date, author, label };
       });
   } catch {
