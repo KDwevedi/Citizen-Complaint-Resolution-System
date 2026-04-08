@@ -131,6 +131,69 @@
 }
 .ccrs-chat-close:hover { color: #fff; }
 
+/* Chat session tabs */
+.ccrs-chat-session-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #e8e8e8;
+  overflow-x: auto;
+  min-height: 32px;
+}
+.ccrs-chat-session-tabs::-webkit-scrollbar { height: 0; }
+.ccrs-session-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 140px;
+  color: #666;
+  transition: all 0.1s;
+}
+.ccrs-session-tab.active {
+  background: #fff;
+  border-color: #f47738;
+  color: #1a1a1a;
+  font-weight: 500;
+}
+.ccrs-session-tab:hover { border-color: #ccc; }
+.ccrs-session-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+.ccrs-session-tab-close {
+  font-size: 13px;
+  color: #999;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 2px;
+}
+.ccrs-session-tab-close:hover { color: #d73a49; }
+.ccrs-session-tab-add {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px dashed #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #999;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ccrs-session-tab-add:hover { border-color: #f47738; color: #f47738; }
+
 /* Messages */
 .ccrs-chat-messages {
   flex: 1;

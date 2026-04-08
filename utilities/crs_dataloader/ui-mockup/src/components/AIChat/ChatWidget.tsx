@@ -4,13 +4,12 @@ import VersionPanel from './VersionPanel';
 
 const AGENT_API = '/api/agent';
 
-/** Lightweight markdown renderer */
+// --- Markdown renderer ---
 function renderMarkdown(text: string) {
   if (!text) return null;
   const lines = text.split('\n');
   const elements: JSX.Element[] = [];
   let i = 0;
-
   while (i < lines.length) {
     const line = lines[i];
     if (line.startsWith('```')) {
@@ -49,22 +48,20 @@ function inlineFmt(text: string): (string | JSX.Element)[] {
   return parts;
 }
 
-interface Message {
-  role: string;
-  content: string;
-  status?: string;
-  commitHash?: string | null;
-}
-
-interface SessionStatus {
-  active: boolean;
-  branch: string | null;
-}
+// --- Types ---
+interface Message { role: string; content: string; status?: string; commitHash?: string | null; }
+interface ChatSession { id: string; title: string; messageCount: number; lastActivity: number; }
+interface SessionStatus { active: boolean; branch: string | null; }
 
 export default function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chat' | 'changes' | 'versions'>('chat');
+  const [mainTab, setMainTab] = useState<'chat' | 'changes' | 'versions'>('chat');
+
+  // Multi-chat state
+  const [chatList, setChatList] = useState<ChatSession[]>([]);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentTool, setCurrentTool] = useState<string | null>(null);
@@ -74,33 +71,88 @@ export default function ChatWidget() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
-  useEffect(() => { if (isOpen && inputRef.current && activeTab === 'chat') inputRef.current.focus(); }, [isOpen, activeTab]);
+  useEffect(() => { if (isOpen && inputRef.current && mainTab === 'chat') inputRef.current.focus(); }, [isOpen, mainTab]);
 
+  // --- Data fetching ---
   const fetchSession = useCallback(async () => {
-    try {
-      const res = await fetch(`${AGENT_API}/session`);
-      const data = await res.json();
-      setSession({ active: data.active, branch: data.branch });
-    } catch {}
+    try { const r = await fetch(`${AGENT_API}/session`); const d = await r.json(); setSession({ active: d.active, branch: d.branch }); } catch {}
   }, []);
 
   const fetchChanges = useCallback(async () => {
+    try { const r = await fetch(`${AGENT_API}/session/changes`); setChanges(await r.json()); } catch {}
+  }, []);
+
+  const fetchChatList = useCallback(async () => {
+    try { const r = await fetch(`${AGENT_API}/chats`); setChatList(await r.json()); } catch {}
+  }, []);
+
+  const loadChat = useCallback(async (chatId: string) => {
     try {
-      const res = await fetch(`${AGENT_API}/session/changes`);
-      setChanges(await res.json());
+      const r = await fetch(`${AGENT_API}/chats/${chatId}`);
+      const data = await r.json();
+      setActiveChatId(chatId);
+      setMessages((data.messages || []).map((m: any) => ({
+        role: m.role, content: m.content, commitHash: m.commitHash || null, status: 'done',
+      })));
     } catch {}
   }, []);
 
+  // On open: load chat list, session, changes
   useEffect(() => {
-    if (isOpen) { fetchSession(); fetchChanges(); }
-  }, [isOpen, fetchSession, fetchChanges]);
+    if (isOpen) {
+      fetchSession();
+      fetchChanges();
+      fetchChatList().then(() => {
+        // Auto-select most recent chat if none active
+        if (!activeChatId) {
+          fetch(`${AGENT_API}/chats`).then(r => r.json()).then((list: ChatSession[]) => {
+            if (list.length > 0) loadChat(list[0].id);
+          }).catch(() => {});
+        }
+      });
+    }
+  }, [isOpen]); // eslint-disable-line
 
+  const createNewChat = async () => {
+    try {
+      const r = await fetch(`${AGENT_API}/chats`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const chat = await r.json();
+      setChatList(prev => [{ id: chat.id, title: chat.title, messageCount: 0, lastActivity: chat.lastActivity }, ...prev]);
+      setActiveChatId(chat.id);
+      setMessages([]);
+    } catch {}
+  };
+
+  const closeChat = async (chatId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await fetch(`${AGENT_API}/chats/${chatId}`, { method: 'DELETE' });
+    setChatList(prev => prev.filter(c => c.id !== chatId));
+    if (activeChatId === chatId) {
+      const remaining = chatList.filter(c => c.id !== chatId);
+      if (remaining.length > 0) loadChat(remaining[0].id);
+      else { setActiveChatId(null); setMessages([]); }
+    }
+  };
+
+  // --- Send message ---
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isStreaming) return;
     const userMessage = input.trim();
     setInput('');
     setIsStreaming(true);
     setCurrentTool(null);
+
+    // Auto-create chat if none
+    let chatId = activeChatId;
+    if (!chatId) {
+      try {
+        const r = await fetch(`${AGENT_API}/chats`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const chat = await r.json();
+        chatId = chat.id;
+        setActiveChatId(chatId);
+        setChatList(prev => [{ id: chat.id, title: chat.title, messageCount: 0, lastActivity: chat.lastActivity }, ...prev]);
+      } catch {}
+    }
 
     const newMessages = [...messages, { role: 'user', content: userMessage }];
     setMessages(newMessages);
@@ -113,6 +165,7 @@ export default function ChatWidget() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: userMessage,
+          chatId,
           context: {
             currentRoute: window.location.pathname,
             conversationHistory: newMessages.slice(-10).map(m => ({ role: m.role, content: m.content })),
@@ -164,6 +217,7 @@ export default function ChatWidget() {
               setCurrentTool(null);
               fetchChanges();
               fetchSession();
+              fetchChatList(); // refresh titles
             } else if (event.type === 'error') {
               setMessages(prev => {
                 const updated = [...prev];
@@ -183,43 +237,32 @@ export default function ChatWidget() {
     }
     setIsStreaming(false);
     setCurrentTool(null);
-  }, [input, isStreaming, messages, fetchChanges, fetchSession]);
+  }, [input, isStreaming, messages, activeChatId, fetchChanges, fetchSession, fetchChatList]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
+  // --- Git actions ---
   const handleAccept = async () => {
-    const label = prompt('Version label (e.g. v1-dashboard-redesign):');
+    const label = prompt('Version label:');
     if (!label) return;
-    const res = await fetch(`${AGENT_API}/session/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) });
-    const data = await res.json();
-    if (data.success) {
-      setSession({ active: false, branch: null });
-      setChanges([]);
-      setMessages([]);
-      setActiveTab('versions');
-    } else {
-      alert('Failed: ' + data.error);
-    }
+    const r = await fetch(`${AGENT_API}/session/accept`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) });
+    const d = await r.json();
+    if (d.success) { setSession({ active: false, branch: null }); setChanges([]); setMainTab('versions'); }
+    else alert('Failed: ' + d.error);
   };
 
   const handleDiscard = async () => {
-    if (!confirm('Discard all changes? This deletes the session branch entirely.')) return;
-    const res = await fetch(`${AGENT_API}/session/discard`, { method: 'POST' });
-    const data = await res.json();
-    if (data.success) {
-      setSession({ active: false, branch: null });
-      setChanges([]);
-      setMessages([]);
-      setTimeout(() => window.location.reload(), 1000);
-    } else {
-      alert('Failed: ' + data.error);
-    }
+    if (!confirm('Discard all changes?')) return;
+    const r = await fetch(`${AGENT_API}/session/discard`, { method: 'POST' });
+    const d = await r.json();
+    if (d.success) { setSession({ active: false, branch: null }); setChanges([]); setTimeout(() => window.location.reload(), 1000); }
+    else alert('Failed: ' + d.error);
   };
 
   const handleSessionRollback = async (hash: string) => {
-    if (!confirm(`Reset session to ${hash}? Later changes will be lost.`)) return;
+    if (!confirm(`Reset to ${hash}?`)) return;
     await fetch(`${AGENT_API}/session/rollback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ commitHash: hash }) });
     fetchChanges();
     setTimeout(() => window.location.reload(), 1000);
@@ -227,6 +270,7 @@ export default function ChatWidget() {
 
   const changeCount = changes.length;
 
+  // --- FAB ---
   if (!isOpen) {
     return (
       <button className="ccrs-chat-fab" onClick={() => setIsOpen(true)} title="AI Editor">
@@ -239,25 +283,26 @@ export default function ChatWidget() {
     );
   }
 
+  // --- Panel ---
   return (
     <div className="ccrs-chat-panel">
+      {/* Header tabs */}
       <div className="ccrs-chat-header">
         <div className="ccrs-chat-tabs">
-          <button className={`ccrs-tab ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
-            Chat
-            {session.active && <span className="ccrs-session-indicator" title="Editing session active" />}
+          <button className={`ccrs-tab ${mainTab === 'chat' ? 'active' : ''}`} onClick={() => setMainTab('chat')}>
+            Chat {session.active && <span className="ccrs-session-indicator" />}
           </button>
-          <button className={`ccrs-tab ${activeTab === 'changes' ? 'active' : ''}`} onClick={() => { setActiveTab('changes'); fetchChanges(); }}>
+          <button className={`ccrs-tab ${mainTab === 'changes' ? 'active' : ''}`} onClick={() => { setMainTab('changes'); fetchChanges(); }}>
             Changes{changeCount > 0 && <span className="ccrs-tab-count">{changeCount}</span>}
           </button>
-          <button className={`ccrs-tab ${activeTab === 'versions' ? 'active' : ''}`} onClick={() => setActiveTab('versions')}>Versions</button>
+          <button className={`ccrs-tab ${mainTab === 'versions' ? 'active' : ''}`} onClick={() => setMainTab('versions')}>Versions</button>
         </div>
         <button className="ccrs-chat-close" onClick={() => setIsOpen(false)}>&times;</button>
       </div>
 
-      {activeTab === 'versions' ? (
+      {mainTab === 'versions' ? (
         <VersionPanel sessionActive={session.active} />
-      ) : activeTab === 'changes' ? (
+      ) : mainTab === 'changes' ? (
         <div className="ccrs-staged">
           {session.active && (
             <div className="ccrs-staged-actions">
@@ -286,6 +331,23 @@ export default function ChatWidget() {
         </div>
       ) : (
         <>
+          {/* Chat session tabs */}
+          <div className="ccrs-chat-session-tabs">
+            {chatList.map((chat) => (
+              <button
+                key={chat.id}
+                className={`ccrs-session-tab ${chat.id === activeChatId ? 'active' : ''}`}
+                onClick={() => loadChat(chat.id)}
+                title={chat.title}
+              >
+                <span className="ccrs-session-tab-title">{chat.title}</span>
+                <span className="ccrs-session-tab-close" onClick={(e) => closeChat(chat.id, e)}>&times;</span>
+              </button>
+            ))}
+            <button className="ccrs-session-tab-add" onClick={createNewChat} title="New chat">+</button>
+          </div>
+
+          {/* Messages */}
           <div className="ccrs-chat-messages">
             {messages.length === 0 && (
               <div className="ccrs-chat-empty">

@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const { spawn } = require("child_process");
 const path = require("path");
+const { listChats, getChat, createChat, appendMessage, deleteChat, updateChat } = require("./chat-store");
 const {
   getSessionStatus,
   createSession,
@@ -141,11 +142,38 @@ app.post("/api/agent/versions/rollback", async (req, res) => {
   }
 });
 
+// --- Chat persistence endpoints ---
+
+app.get("/api/agent/chats", (req, res) => {
+  res.json(listChats());
+});
+
+app.get("/api/agent/chats/:id", (req, res) => {
+  const chat = getChat(req.params.id);
+  if (!chat) return res.status(404).json({ error: "not found" });
+  res.json(chat);
+});
+
+app.post("/api/agent/chats", (req, res) => {
+  const { title } = req.body || {};
+  res.json(createChat(title));
+});
+
+app.delete("/api/agent/chats/:id", (req, res) => {
+  deleteChat(req.params.id);
+  res.json({ success: true });
+});
+
 // --- Chat endpoint ---
 
 app.post("/api/agent/chat", async (req, res) => {
-  const { message, context = {} } = req.body;
+  const { message, context = {}, chatId } = req.body;
   if (!message) return res.status(400).json({ error: "message is required" });
+
+  // Persist user message
+  if (chatId) {
+    appendMessage(chatId, { role: "user", content: message, timestamp: Date.now() });
+  }
 
   // SSE headers
   res.writeHead(200, {
@@ -289,6 +317,16 @@ app.post("/api/agent/chat", async (req, res) => {
     claude.on("close", (code) => {
       const shortMsg = message.length > 60 ? message.slice(0, 57) + "..." : message;
       const commitHash = autoCommit(`AI: ${shortMsg}`);
+
+      // Persist assistant response
+      if (chatId && fullResponse) {
+        appendMessage(chatId, {
+          role: "assistant",
+          content: fullResponse,
+          commitHash,
+          timestamp: Date.now(),
+        });
+      }
 
       sendEvent({
         type: "done",
