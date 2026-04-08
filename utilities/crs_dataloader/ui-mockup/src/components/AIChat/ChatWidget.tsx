@@ -115,51 +115,56 @@ export default function ChatWidget() {
   }, []);
 
   // Poll for events after reconnect (HMR reload)
-  const startPolling = useCallback(() => {
+  // Rebuilds messages from the full event buffer — replaces messages, never appends duplicates
+  const startPolling = useCallback((baseMessages: Message[]) => {
     if (pollTimerRef.current) return;
     setIsStreaming(true);
+
+    // Snapshot the persisted messages as the base — poll events append on top
+    const base = [...baseMessages];
+    let lastId = 0;
+
     pollTimerRef.current = setInterval(async () => {
       try {
-        const r = await fetch(`${AGENT_API}/stream/events?since=${lastEventIdRef.current}`);
+        const r = await fetch(`${AGENT_API}/stream/events?since=${lastId}`);
         const data = await r.json();
-        for (const evt of data.events) {
-          lastEventIdRef.current = evt.id;
-          if (evt.type === 'new_block') {
-            const role = evt.blockType === 'tool' ? 'tool' : 'assistant';
-            const content = evt.blockType === 'tool' ? (evt.label || '') : '';
-            setMessages(prev => [...prev, { role, content, status: 'streaming' }]);
-          } else if (evt.type === 'text') {
-            setMessages(prev => {
-              const updated = [...prev];
-              const last = updated[updated.length - 1];
-              if (last && last.status === 'streaming') {
-                updated[updated.length - 1] = { ...last, content: last.content + evt.content };
+
+        if (data.events.length > 0) {
+          // Rebuild streamed messages from ALL events so far
+          const streamed: Message[] = [];
+          for (const evt of data.events) {
+            lastId = evt.id;
+            if (evt.type === 'new_block') {
+              const role = evt.blockType === 'tool' ? 'tool' : 'assistant';
+              const content = evt.blockType === 'tool' ? (evt.label || '') : '';
+              streamed.push({ role, content, status: 'streaming' });
+            } else if (evt.type === 'text') {
+              const last = streamed[streamed.length - 1];
+              if (last && last.role === 'assistant') {
+                last.content += evt.content;
               }
-              return updated;
-            });
-          } else if (evt.type === 'tool_use') {
-            setCurrentTool(evt.label || evt.tool);
-          } else if (evt.type === 'status') {
-            setCurrentTool(evt.detail ? `${evt.content} ${evt.detail}` : evt.content);
-          } else if (evt.type === 'done') {
-            setMessages(prev => {
-              const updated = [...prev];
-              const last = updated[updated.length - 1];
-              if (last) updated[updated.length - 1] = { ...last, status: 'done', commitHash: evt.commitHash };
-              return updated;
-            });
-            setCurrentTool(null);
-            setIsStreaming(false);
-            fetchChanges();
-            fetchSession();
-            fetchChatList();
+            } else if (evt.type === 'tool_use') {
+              setCurrentTool(evt.label || evt.tool);
+            } else if (evt.type === 'status') {
+              setCurrentTool(evt.detail ? `${evt.content} ${evt.detail}` : evt.content);
+            } else if (evt.type === 'done') {
+              const last = streamed[streamed.length - 1];
+              if (last) { last.status = 'done'; last.commitHash = evt.commitHash; }
+              setCurrentTool(null);
+            }
           }
+          // Set messages = persisted base + live streamed
+          setMessages([...base, ...streamed]);
         }
+
         if (data.done && pollTimerRef.current) {
           clearInterval(pollTimerRef.current);
           pollTimerRef.current = null;
           setIsStreaming(false);
           setCurrentTool(null);
+          fetchChanges();
+          fetchSession();
+          fetchChatList();
         }
       } catch {}
     }, 500);
@@ -178,14 +183,21 @@ export default function ChatWidget() {
       fetchChatList().then(() => {
         const savedId = activeChatId || localStorage.getItem('ccrs-active-chat');
         if (savedId) {
-          loadChat(savedId).then(() => {
+          loadChat(savedId).then(async () => {
             // Check if there's an active stream to catch up on
-            fetch(`${AGENT_API}/stream/status`).then(r => r.json()).then(status => {
+            try {
+              const statusRes = await fetch(`${AGENT_API}/stream/status`);
+              const status = await statusRes.json();
               if (status.active) {
-                lastEventIdRef.current = 0; // get all buffered events
-                startPolling();
+                // Get persisted messages as the base for polling
+                const chatRes = await fetch(`${AGENT_API}/chats/${savedId}`);
+                const chatData = await chatRes.json();
+                const base = (chatData.messages || []).map((m: any) => ({
+                  role: m.role, content: m.content || '', commitHash: m.commitHash || null, status: 'done' as const,
+                }));
+                startPolling(base);
               }
-            }).catch(() => {});
+            } catch {}
           });
         } else {
           fetch(`${AGENT_API}/chats`).then(r => r.json()).then((list: ChatSession[]) => {
