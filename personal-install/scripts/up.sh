@@ -14,7 +14,14 @@ CONFIG="$ROOT/config.env"
 
 # Load config.env defaults — but DON'T clobber anything already in the env,
 # so `SEED_DEMO_DATA=false ./scripts/up.sh` works without editing config.env.
-[[ -f "$CONFIG" ]] || { echo "missing $CONFIG"; exit 2; }
+if [[ ! -f "$CONFIG" ]]; then
+  if [[ -f "${CONFIG}.example" ]]; then
+    echo "▸ first run — copying config.env.example → config.env (edit it for your machine)"
+    cp "${CONFIG}.example" "$CONFIG"
+  else
+    echo "missing $CONFIG and no .example to fall back on"; exit 2
+  fi
+fi
 while IFS= read -r line; do
   [[ "$line" =~ ^[[:space:]]*# || -z "${line//[[:space:]]/}" ]] && continue
   key="${line%%=*}"
