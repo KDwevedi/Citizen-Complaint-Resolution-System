@@ -6,6 +6,5 @@
 stack/docker-compose.local.yaml
 
 # Local credentials override (config.env.example is the public version)
-config.env
 
 # Symlink-target node_modules / dist
