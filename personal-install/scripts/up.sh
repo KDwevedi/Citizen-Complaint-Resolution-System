@@ -26,20 +26,7 @@ while IFS= read -r line; do
 done < "$CONFIG"
 
 PROJECT="${COMPOSE_PROJECT_NAME:-naipepea-personal}"
-# Three layers, applied in order so later wins on conflicts:
-#   local    — port-shifted upstream compose (stays close to CCRS local-setup)
-#   naipepea — image overrides to match what naipepea actually runs
-#   extra    — personal-install additions (configurator service)
-# local.yaml = all 27 services (port-shifted from upstream)
-# extra.yaml = adds the configurator container
-# naipepea.yaml = image overrides; optional — adds 5+ GB of pulls.
-#                 Set USE_NAIPEPEA_IMAGES=true in config.env to opt in.
-COMPOSE_FILES=(-f "$ROOT/stack/docker-compose.local.yaml"
-               -f "$ROOT/stack/docker-compose.extra.yaml")
-if [[ "${USE_NAIPEPEA_IMAGES:-false}" == "true" ]]; then
-  COMPOSE_FILES+=(-f "$ROOT/stack/docker-compose.naipepea.yaml")
-  echo "▸ image overrides ON — pulling from \$REGISTRY_URL"
-fi
+COMPOSE_FILES=(-f "$ROOT/stack/docker-compose.yaml")
 
 # ─── OS / architecture detection ─────────────────────────────────────────────
 # OS=auto resolves via uname. naipepea's images are amd64-only — only Apple
@@ -88,10 +75,6 @@ case "$OS" in
 esac
 
 ANSIBLE_BIN="$(command -v ansible-playbook 2>/dev/null || echo "$HOME/.local/bin/ansible-playbook")"
-
-# Always regenerate the port-shifted compose file from upstream. Cheap, and
-# catches new services upstream might have added on new 18xxx ports.
-PORT_PREFIX="${PORT_PREFIX:-16}" python3 "$ROOT/scripts/gen-compose.py" >/dev/null
 
 # Build the configurator dist if missing; the extra compose file mounts it.
 CFG_DIR="$ROOT/../digit-configurator"
