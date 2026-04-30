@@ -98,7 +98,7 @@ mode="${1:-all}"
 
 up_stack() {
   echo "▸ docker compose pull (cache hits skip)…"
-  COMPOSE_PROJECT_NAME="$PROJECT" docker compose "${COMPOSE_FILES[@]}" pull --quiet
+  COMPOSE_PROJECT_NAME="$PROJECT" docker compose "${COMPOSE_FILES[@]}" pull --progress=plain
   echo "▸ docker compose up -d (kong on :${PORT_PREFIX}000, configurator on :${PORT_PREFIX}172)…"
   COMPOSE_PROJECT_NAME="$PROJECT" docker compose "${COMPOSE_FILES[@]}" up -d
   echo "▸ waiting for kong-gateway healthy (up to 5 min)…"
