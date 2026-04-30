@@ -88,16 +88,33 @@ mode="${1:-all}"
 
 up_stack() {
   echo "▸ docker compose pull (cache hits skip)…"
-  COMPOSE_PROJECT_NAME="$PROJECT" docker compose "${COMPOSE_FILES[@]}" pull
+  COMPOSE_PROJECT_NAME="$PROJECT" docker compose "${COMPOSE_FILES[@]}" pull \
+    || { echo "  ✗ pull failed"; return 1; }
+
   echo "▸ docker compose up -d (kong on :${PORT_PREFIX}000, configurator on :${PORT_PREFIX}172)…"
-  COMPOSE_PROJECT_NAME="$PROJECT" docker compose "${COMPOSE_FILES[@]}" up -d
+  if ! COMPOSE_PROJECT_NAME="$PROJECT" docker compose "${COMPOSE_FILES[@]}" up -d; then
+    echo "  ✗ docker compose up -d failed."
+    echo "    Common cause: a container name (e.g. 'digit-ui') already in use from a prior partial run."
+    echo "    Recover with:"
+    echo "      docker compose -f $ROOT/stack/docker-compose.yaml -p $PROJECT down"
+    echo "      ./scripts/up.sh"
+    return 1
+  fi
+
+  # Confirm kong-gateway container exists at all before polling its health
+  if ! docker inspect kong-gateway >/dev/null 2>&1; then
+    echo "  ✗ kong-gateway container doesn't exist — compose didn't create it."
+    echo "    Check 'docker compose -f $ROOT/stack/docker-compose.yaml -p $PROJECT ps -a' for what's there."
+    return 1
+  fi
+
   echo "▸ waiting for kong-gateway healthy (up to 5 min)…"
   for _ in $(seq 1 60); do
-    h=$(docker inspect --format '{{.State.Health.Status}}' kong-gateway 2>/dev/null || echo starting)
+    h=$(docker inspect --format '{{.State.Health.Status}}' kong-gateway 2>/dev/null)
     [[ "$h" == healthy ]] && { echo "  kong healthy"; return 0; }
     sleep 5
   done
-  echo "  kong did not reach healthy — check 'docker compose ${COMPOSE_FILES[*]} logs kong-gateway'"
+  echo "  kong did not reach healthy — check 'docker logs kong-gateway'"
   return 1
 }
 
