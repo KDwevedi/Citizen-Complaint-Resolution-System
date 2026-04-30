@@ -856,9 +856,6 @@ services:
     networks:
     - egov-network
   jupyter:
-    build:
-      context: ./jupyter
-      dockerfile: Dockerfile
     container_name: digit-jupyter
     user: root
     depends_on:
@@ -887,6 +884,7 @@ services:
     - ./jupyter/DataLoader_v2.ipynb:/home/jovyan/work/DataLoader_v2.ipynb
     networks:
     - egov-network
+    image: ${REGISTRY_URL}/tilt-demo-jupyter:latest
   telemetry:
     image: alpine:3.20
     container_name: digit-telemetry
