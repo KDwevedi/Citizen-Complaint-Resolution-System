@@ -1,0 +1,57 @@
+---
+# Ensure the configurator SPA dist is built and the service is reachable.
+# The container itself is brought up by docker-compose.extra.yaml (mounting
+# the pre-built dist read-only); this task is the build-side of that
+# contract: if dist/ is empty, build it before the container starts.
+
+- name: "Locate digit-configurator sibling repo"
+  ansible.builtin.set_fact:
+    configurator_dir: "{{ playbook_dir }}/../../../egov/digit-configurator"
+
+- name: "Confirm digit-configurator exists at {{ configurator_dir }}"
+  ansible.builtin.stat:
+    path: "{{ configurator_dir }}/package.json"
+  register: configurator_stat
+  failed_when: not configurator_stat.stat.exists
+
+- name: "Install configurator deps (root + data-provider) if missing"
+  ansible.builtin.command: npm install
+  args:
+    chdir: "{{ configurator_dir }}"
+    creates: "{{ configurator_dir }}/node_modules/.package-lock.json"
+
+- name: "Build configurator data-provider sub-package if missing"
+  ansible.builtin.command: npm run build
+  args:
+    chdir: "{{ configurator_dir }}/packages/data-provider"
+    creates: "{{ configurator_dir }}/packages/data-provider/dist/index.js"
+
+- name: "Build configurator SPA if dist missing"
+  ansible.builtin.command: npx vite build --base=/configurator/
+  args:
+    chdir: "{{ configurator_dir }}"
+    creates: "{{ configurator_dir }}/dist/index.html"
+
+- name: "Wait for configurator container to bind {{ port_prefix }}172"
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ port_prefix }}172"
+    timeout: 30
+  register: cfg_wait
+  failed_when: false
+
+- name: "Probe configurator HTTP"
+  ansible.builtin.uri:
+    url: "http://localhost:{{ port_prefix }}172/configurator/"
+    status_code: [200]
+    timeout: 5
+  register: cfg_probe
+  retries: 6
+  delay: 2
+  until: cfg_probe.status == 200
+
+- name: "Confirm configurator ready"
+  ansible.builtin.debug:
+    msg: |
+      ✓ configurator at http://localhost:{{ port_prefix }}172/configurator/
+        bundle: {{ cfg_probe.content | default('') | regex_search('index-[A-Za-z0-9_-]+\\.js') | default('(unknown)') }}

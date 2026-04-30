@@ -1,0 +1,51 @@
+---
+# Create the 4 PGR dashboard materialized views in local Postgres.
+#
+# Why this is needed: pgr-services' DashboardRefreshScheduler refreshes
+# pgr_mv_kpi / pgr_mv_monthly / pgr_mv_monthly_source / pgr_mv_dimension every
+# minute, but it doesn't CREATE them. naipepea has them from a manually-run
+# DDL captured via pg_dump → personal-install/sql/pgr-mv.sql.
+#
+# Idempotent: the SQL file uses DROP ... IF EXISTS CASCADE before each CREATE,
+# so re-running re-creates. The DashboardRefreshScheduler then repopulates
+# within ~60 seconds (or sooner — it ticks once per minute on its own clock).
+
+- name: "Apply pgr-mv DDL via docker exec psql"
+  ansible.builtin.shell: |
+    docker exec -i docker-postgres psql -U egov -d egov < {{ playbook_dir }}/../sql/pgr-mv.sql
+  args:
+    executable: /bin/bash
+  register: pgr_mv_apply
+  changed_when: "'CREATE MATERIALIZED VIEW' in pgr_mv_apply.stdout"
+
+- name: "Trigger initial refresh (so the dashboard works before scheduler ticks)"
+  ansible.builtin.shell: |
+    docker exec docker-postgres psql -U egov -d egov -c "
+      REFRESH MATERIALIZED VIEW public.pgr_mv_kpi;
+      REFRESH MATERIALIZED VIEW public.pgr_mv_monthly;
+      REFRESH MATERIALIZED VIEW public.pgr_mv_monthly_source;
+      REFRESH MATERIALIZED VIEW public.pgr_mv_dimension;
+    "
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: "Confirm MVs exist + show row counts"
+  ansible.builtin.shell: |
+    docker exec docker-postgres psql -U egov -d egov -t -A -c "
+      SELECT 'pgr_mv_kpi: ' || count(*) FROM pgr_mv_kpi UNION ALL
+      SELECT 'pgr_mv_monthly: ' || count(*) FROM pgr_mv_monthly UNION ALL
+      SELECT 'pgr_mv_monthly_source: ' || count(*) FROM pgr_mv_monthly_source UNION ALL
+      SELECT 'pgr_mv_dimension: ' || count(*) FROM pgr_mv_dimension;
+    "
+  args:
+    executable: /bin/bash
+  register: mv_counts
+  changed_when: false
+
+- name: "Confirm pgr-mvs ready"
+  ansible.builtin.debug:
+    msg: |
+      ✓ PGR dashboard MVs:
+      {% for line in mv_counts.stdout_lines %}    {{ line }} rows
+      {% endfor %}

@@ -1,0 +1,188 @@
+---
+# Seed boundary entities + relationships from data/boundaries.json.
+#
+# Two-step DIGIT API:
+#   1. POST /boundary-service/boundary/_create
+#   2. POST /boundary-service/boundary-relationships/_create
+#
+# Idempotent: search first, only create what's missing.
+#
+# Source format (data/boundaries.json):
+#   { "county": "Nairobi City",
+#     "subCounties": { "Makadara": ["Harambee", "Maringo/Hamza", ...], ... } }
+
+- name: "Read boundaries.json"
+  ansible.builtin.set_fact:
+    boundaries: "{{ lookup('file', seed_boundaries_file) | from_json }}"
+
+# Build the three levels as separate lists. Verbose but unambiguous and works
+# on stock Ansible without a custom filter plugin.
+
+- name: "Build county entity"
+  ansible.builtin.set_fact:
+    county_entity:
+      code: "{{ (personal_tenant_city | upper | regex_replace('\\.', '_')) }}_COUNTY"
+      name: "{{ boundaries.county }}"
+      boundaryType: "County"
+
+- name: "Build sub-county entities"
+  ansible.builtin.set_fact:
+    subcounty_entities: "{{ subcounty_entities | default([]) + [{
+      'code': (personal_tenant_city | upper | regex_replace('\\.', '_')) + '_' + (item | upper | regex_replace('[^A-Z0-9]+', '_')),
+      'name': item,
+      'boundaryType': 'SubCounty',
+      'parent_code': county_entity.code,
+    }] }}"
+  loop: "{{ boundaries.subCounties.keys() | list }}"
+
+- name: "Flatten subCounties dict into [subcounty_name, ward_name] pairs"
+  ansible.builtin.set_fact:
+    sc_ward_pairs: "{{ sc_ward_pairs | default([]) + (item.value | map('regex_replace', '^(.*)$', item.key + '|||\\1') | list) }}"
+  loop: "{{ boundaries.subCounties | dict2items }}"
+  loop_control: { label: "{{ item.key }}" }
+
+- name: "Build ward entities from flattened pairs"
+  ansible.builtin.set_fact:
+    ward_entities: "{{ ward_entities | default([]) + [{
+      'code': (personal_tenant_city | upper | regex_replace('\\.', '_')) + '_' + (item.split('|||')[1] | upper | regex_replace('[^A-Z0-9]+', '_')),
+      'name': item.split('|||')[1],
+      'boundaryType': 'Ward',
+      'parent_code': (personal_tenant_city | upper | regex_replace('\\.', '_')) + '_' + (item.split('|||')[0] | upper | regex_replace('[^A-Z0-9]+', '_')),
+    }] }}"
+  loop: "{{ sc_ward_pairs | default([]) }}"
+  loop_control: { label: "{{ item }}" }
+
+- name: "Show what we built"
+  ansible.builtin.debug:
+    msg:
+      - "county: {{ county_entity.code }}"
+      - "sub-counties: {{ subcounty_entities | length }} ({{ subcounty_entities | map(attribute='code') | join(', ') }})"
+      - "wards: {{ ward_entities | length }}"
+
+# ---------------------------------------------------------------------------
+# Search-then-create. Boundary service _search responses vary across DIGIT
+# versions; tolerate 200/400/404 and fall back to "create everything" if the
+# search shape isn't recognized.
+# ---------------------------------------------------------------------------
+
+- name: "Search existing boundaries on city tenant"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/boundary-service/boundary/_search?tenantId={{ personal_tenant_city }}"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: "{{ request_info_base }}"
+    status_code: [200, 400, 404]
+    return_content: true
+  register: existing_boundaries
+
+- name: "Compute set of existing boundary codes"
+  ansible.builtin.set_fact:
+    existing_codes: "{{ (existing_boundaries.json.Boundary | default([])) | map(attribute='code') | list }}"
+
+- name: "Create boundaries (skip ones already on tenant)"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/boundary-service/boundary/_create"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: "{{ request_info_base }}"
+      Boundary:
+        - tenantId: "{{ personal_tenant_city }}"
+          code: "{{ item.code }}"
+          geometry: null
+          additionalDetails:
+            name: "{{ item.name }}"
+            boundaryType: "{{ item.boundaryType }}"
+    status_code: [200, 201, 202]
+  loop: "{{ [county_entity] + subcounty_entities + ward_entities }}"
+  loop_control: { label: "{{ item.code }} ({{ item.boundaryType }})" }
+  when: item.code not in existing_codes
+
+# ---------------------------------------------------------------------------
+# Hierarchy definition — declares the level chain (County → SubCounty → Ward)
+# for this tenant. Boundary-relationship _create requires this first.
+# ---------------------------------------------------------------------------
+
+- name: "Search existing hierarchy definitions"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/boundary-service/boundary-hierarchy-definition/_search"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: "{{ request_info_base }}"
+      BoundaryTypeHierarchySearchCriteria:
+        tenantId: "{{ personal_tenant_city }}"
+        hierarchyType: "ADMIN"
+    status_code: [200, 400, 404]
+    return_content: true
+  register: existing_hierarchy
+
+- name: "Create ADMIN hierarchy definition (County → SubCounty → Ward)"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/boundary-service/boundary-hierarchy-definition/_create"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: "{{ request_info_base }}"
+      BoundaryHierarchy:
+        tenantId: "{{ personal_tenant_city }}"
+        hierarchyType: "ADMIN"
+        boundaryHierarchy:
+          - boundaryType: "County"
+            parentBoundaryType: null
+          - boundaryType: "SubCounty"
+            parentBoundaryType: "County"
+          - boundaryType: "Ward"
+            parentBoundaryType: "SubCounty"
+    status_code: [200, 201, 202]
+  when: (existing_hierarchy.json.BoundaryHierarchy | default([], true)) | length == 0
+
+# ---------------------------------------------------------------------------
+# Boundary relationships — wire the hierarchy. Hierarchy type is `ADMIN` by
+# convention; that's what `egov-location` and digit-ui consume.
+# ---------------------------------------------------------------------------
+
+- name: "Search existing boundary relationships (POST — GET unsupported)"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/boundary-service/boundary-relationships/_search?tenantId={{ personal_tenant_city }}&hierarchyType=ADMIN"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: "{{ request_info_base }}"
+    status_code: [200, 400, 404]
+    return_content: true
+  register: existing_rels
+
+# Server returns TenantBoundary[].boundary[] as a tree; flatten then collect
+# all codes so we can skip duplicates. Empty for a fresh install.
+- name: "Compute set of existing boundary-relationship codes"
+  ansible.builtin.set_fact:
+    existing_rel_codes: "{{ (existing_rels.json.TenantBoundary | default([], true) | map(attribute='boundary') | list | flatten | default([], true)) | map(attribute='code') | list | default([], true) }}"
+
+- name: "Create boundary-relationships (idempotent — DUPLICATE_RECORD = already exists)"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/boundary-service/boundary-relationships/_create"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: "{{ request_info_base }}"
+      BoundaryRelationship:
+        tenantId: "{{ personal_tenant_city }}"
+        hierarchyType: "ADMIN"
+        boundaryType: "{{ item.boundaryType }}"
+        code: "{{ item.code }}"
+        parent: "{{ item.parent_code | default(omit) }}"
+    status_code: [200, 201, 202, 400]
+  register: rel_create
+  failed_when:
+    - rel_create.status not in [200, 201, 202]
+    - "'DUPLICATE_RECORD' not in ((rel_create.json.Errors | default([]) | map(attribute='code') | list | join(',')) | default(''))"
+  loop: "{{ [(county_entity | combine({'parent_code': None}))] + subcounty_entities + ward_entities }}"
+  loop_control: { label: "{{ item.code }} → {{ item.parent_code | default('(root)') }}" }

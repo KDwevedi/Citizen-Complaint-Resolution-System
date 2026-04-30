@@ -1,0 +1,66 @@
+---
+# Seed HRMS employees from data/employees.json.
+#
+# Source format (28 records):
+#   [ { "name": "...", "department": "Lands", "designation": "Director",
+#       "mobileNumber": "722...", "email": null, "roles": null, "wards": null }, ... ]
+#
+# Many fields are null in the seed file — fill in defaults so the records are
+# usable: roles default to ["EMPLOYEE", "DGRO"] (per Bomet template), wards
+# default to all ward codes seeded in step 03.
+#
+# DIGIT APIs:
+#   1. /user/users/_createnovalidate    — create user record (citizen-like)
+#   2. /egov-hrms/employees/_create     — wrap user in HRMS shape with roles +
+#                                         dept + designation + jurisdictions
+#
+# Idempotent: search by mobileNumber; skip if employee exists.
+#
+# Watch for:
+#  - eg_user.username/mobilenumber are encrypted (Kenya DPA). Search uses
+#    encryption layer — call /egov-hrms/employees/_search, not /user/_search.
+#  - Default password is `eGov@123`. Force-rotate-on-first-login isn't wired.
+#  - Mobile number must pass the configured Kenya regex
+#    (common-masters.UserValidation.mobile = `^(0?7|0?1)\d{8}$`).
+#    Records like `722320295` (9 digits) are invalid until prefixed with `0`.
+
+- name: "Read employees.json"
+  ansible.builtin.set_fact:
+    employees: "{{ lookup('file', seed_employees_file) | from_json }}"
+
+- name: "Normalize mobile numbers (prefix `0` if 9-digit)"
+  ansible.builtin.set_fact:
+    employees_normalized: >-
+      {{ employees | map('combine', {'mobileNumber':
+           ('0' + (item.mobileNumber | string)) if (item.mobileNumber | string | length) == 9
+           else (item.mobileNumber | string)}) | list }}
+  loop: "{{ employees }}"
+  loop_control:
+    label: "{{ item.name }}"
+    loop_var: item
+  # NOTE: above expression is illustrative — real version should use a Python
+  # filter or a per-employee `set_fact` to avoid the loop-variable collision.
+  failed_when: true
+  tags: [todo]
+
+- name: "TODO — search-then-create each employee"
+  ansible.builtin.debug:
+    msg: |
+      Next step: per employee
+        1. POST /egov-hrms/employees/_search  body { tenantId, codes:[<mobile>] }
+           — actually search by `mobileNumber` since `code` is server-assigned
+        2. If absent, POST /egov-hrms/employees/_create
+           body shape (abridged):
+             Employees: [{ tenantId, code: <derived>, dateOfAppointment,
+                            user: { name, mobileNumber, dob, password,
+                                    roles: [{code, name, tenantId}], type: "EMPLOYEE" },
+                            assignments: [{ department, designation,
+                                            fromDate, isCurrentAssignment, ... }],
+                            jurisdictions: [{ hierarchy: "ADMIN",
+                                              boundaryType: "Ward",
+                                              boundary: "<ward-code>", ... }] }]
+        3. On success, capture username/password and append to a credentials.csv
+           for hand-distribution.
+
+      Special-case the first employee as ADMIN of the tenant (already exists in
+      v2.11 init data; we only add the rest).

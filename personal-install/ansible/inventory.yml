@@ -1,0 +1,37 @@
+---
+# personal-install target. Local docker compose stack on the same laptop, so
+# Ansible runs against localhost via the local connection (no SSH).
+all:
+  hosts:
+    localhost:
+      ansible_connection: local
+      ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  vars:
+    # Port prefix and Kong URL — driven by config.env (PORT_PREFIX). Falls
+    # back to 16 if env not exported (e.g. when running ansible standalone).
+    port_prefix: "{{ lookup('env', 'PORT_PREFIX') | default('16', true) }}"
+    kong_url: "http://localhost:{{ port_prefix }}000"
+
+    # Seeding mode. true = create tenants + boundaries (Nairobi-flavored).
+    # false = plain install, skip all seeding so the user can drive tenant
+    # creation through the configurator's onboarding wizard.
+    seed_demo_data: "{{ lookup('env', 'SEED_DEMO_DATA') | default('true', true) | bool }}"
+
+    # Tenant taxonomy for a personal install. Driven by config.env or override
+    # at the CLI:  -e personal_tenant_root=in -e personal_tenant_city=in.mumbai
+    # Ignored when seed_demo_data is false.
+    personal_tenant_root: "{{ lookup('env', 'PERSONAL_TENANT_ROOT') | default('ke', true) }}"
+    personal_tenant_city: "{{ lookup('env', 'PERSONAL_TENANT_CITY') | default('ke.nairobi', true) }}"
+
+    # Bootstrap superuser — used to authenticate against the freshly-up stack
+    # before the target tenant exists. CCRS local-setup ships ADMIN/eGov@123
+    # on tenant `pg`. After tenant creation we operate cross-tenant from this
+    # session.
+    bootstrap_tenant: "{{ lookup('env', 'BOOTSTRAP_TENANT') | default('pg', true) }}"
+    bootstrap_user: "{{ lookup('env', 'BOOTSTRAP_USER') | default('ADMIN', true) }}"
+    bootstrap_password: "{{ lookup('env', 'BOOTSTRAP_PASSWORD') | default('eGov@123', true) }}"
+
+    # Seed-data sources (all symlinked into ../data/)
+    seed_boundaries_file: "{{ playbook_dir }}/../data/boundaries.json"
+    seed_employees_file: "{{ playbook_dir }}/../data/employees.json"
+    seed_mdms_dir: "{{ playbook_dir }}/../data/mdms"

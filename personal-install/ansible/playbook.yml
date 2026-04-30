@@ -1,0 +1,164 @@
+---
+# personal-install — gap-closing tasks layered on top of Chakshu's runtime
+# playbook. Run order matters; each step assumes the previous succeeded.
+#
+#   ansible-playbook -i inventory.yml playbook.yml
+#   ansible-playbook -i inventory.yml playbook.yml --tags=mdms
+#   ansible-playbook -i inventory.yml playbook.yml --start-at-task="Seed boundaries"
+
+- name: "Personal install — seed a fresh DIGIT stack with PGR config"
+  hosts: localhost
+  gather_facts: false
+  vars_files: []
+
+  pre_tasks:
+    - name: "Wait for Kong to respond"
+      ansible.builtin.uri:
+        url: "{{ kong_url }}/user/oauth/token"
+        method: POST
+        status_code: [400, 401]   # 400/401 = Kong reachable, login rejected (expected)
+        timeout: 5
+      register: kong_health
+      retries: 30
+      delay: 5
+      until: kong_health.status in [400, 401]
+      tags: [always]
+
+    - name: "Login as bootstrap superuser (against {{ bootstrap_tenant }})"
+      ansible.builtin.uri:
+        url: "{{ kong_url }}/user/oauth/token"
+        method: POST
+        headers:
+          Authorization: "Basic ZWdvdi11c2VyLWNsaWVudDo="   # `egov-user-client:` (empty secret)
+          Content-Type: "application/x-www-form-urlencoded"
+        body_format: form-urlencoded
+        body:
+          grant_type: password
+          username: "{{ bootstrap_user }}"
+          password: "{{ bootstrap_password }}"
+          scope: read
+          tenantId: "{{ bootstrap_tenant }}"
+          userType: EMPLOYEE
+        status_code: 200
+        return_content: true
+      register: auth_response
+      tags: [always]
+
+    - name: "Stash auth token for subsequent calls"
+      ansible.builtin.set_fact:
+        auth_token: "{{ auth_response.json.access_token }}"
+        user_info: "{{ auth_response.json.UserRequest }}"
+        request_info_base:
+          authToken: "{{ auth_response.json.access_token }}"
+          userInfo: "{{ auth_response.json.UserRequest }}"
+          msgId: "personal-install"
+          ts: "{{ ansible_date_time.iso8601 | default('') }}"
+      tags: [always]
+
+  tasks:
+    # include_tasks (not import_tasks) so when: seed_demo_data=false, the file
+    # isn't loaded at all — keeps the plain-mode recap clean. Trade-off:
+    # `--list-tasks` no longer expands the inner steps, but the file paths are
+    # named clearly enough that "what runs in seeded mode" is self-documenting.
+    - name: "Seed: create target tenants (root + city)"
+      ansible.builtin.include_tasks:
+        file: tasks/02-seed-tenants.yml
+        apply:
+          tags: [tenants, seed]
+      tags: [tenants, seed]
+      when: seed_demo_data | bool
+
+    - name: "Seed: boundaries (county → sub-county → ward)"
+      ansible.builtin.include_tasks:
+        file: tasks/03-seed-boundaries.yml
+        apply:
+          tags: [boundaries, seed]
+      tags: [boundaries, seed]
+      when: seed_demo_data | bool
+
+    - name: "Create PGR dashboard materialized views"
+      ansible.builtin.include_tasks:
+        file: tasks/10-create-pgr-mvs.yml
+        apply:
+          tags: [pgr-mv, db, seed]
+      tags: [pgr-mv, db, seed]
+
+    - name: "Ensure digit-configurator built + reachable"
+      ansible.builtin.include_tasks:
+        file: tasks/09-ensure-configurator.yml
+        apply:
+          tags: [configurator, ui]
+      tags: [configurator, ui]
+      when: ensure_configurator | default(true) | bool
+
+    - name: "Spawn digit-ui-esbuild (host-side HMR)"
+      ansible.builtin.include_tasks:
+        file: tasks/08-start-digit-ui-esbuild.yml
+        apply:
+          tags: [esbuild, ui]
+      tags: [esbuild, ui]
+      when: start_esbuild | default(true) | bool
+
+    # ---- everything below is intentionally NOT in the default seed flow ----
+    # The configurator's onboarding wizard at /configurator/ does these steps
+    # interactively, with validation, dependency ordering, bulk-import XLSX
+    # support, and all the UX polish PR #1–#42 added. Re-implementing in
+    # Ansible would duplicate ~6-8 hours of work that already exists in the
+    # SPA. The stubs/optional tasks stay as design notes.
+    #
+    # Default path: log into configurator as pg ADMIN, target ke.nairobi via
+    # the wizard. Phase 2 creates roles, Phase 4 creates the city-tenant
+    # admin. Phase 5 surfaces login URLs.
+    #
+    # Bypass paths (use --tags=stubs or --tags=admin -e enable_stubs=true):
+    #
+    - name: "(optional) Pre-seed SUPERUSER on city tenant — collides with wizard Phase 4"
+      ansible.builtin.import_tasks: tasks/07-seed-admin.yml
+      tags: [admin, stubs, never]
+      when: enable_stubs | default(false) | bool
+
+    - name: "(stub) Seed MDMS records — see configurator wizard"
+      ansible.builtin.import_tasks: tasks/04-seed-mdms.yml
+      tags: [mdms, stubs, never]
+      when: enable_stubs | default(false) | bool
+
+    - name: "(stub) Seed HRMS employees — see configurator wizard"
+      ansible.builtin.import_tasks: tasks/05-seed-employees.yml
+      tags: [employees, stubs, never]
+      when: enable_stubs | default(false) | bool
+
+    - name: "(stub) Seed PGR workflow — covered by MDMS Workflow module"
+      ansible.builtin.import_tasks: tasks/06-seed-pgr.yml
+      tags: [pgr, stubs, never]
+      when: enable_stubs | default(false) | bool
+
+  post_tasks:
+    - name: "Print URLs (seeded mode)"
+      ansible.builtin.debug:
+        msg:
+          - "━━━ Personal install ready (Nairobi-flavored) ━━━"
+          - "  digit-ui (esbuild HMR, host) → http://localhost:{{ port_prefix }}080/digit-ui/"
+          - "  configurator (admin SPA)     → http://localhost:{{ port_prefix }}172/configurator/"
+          - "  Kong API gateway             → http://localhost:{{ port_prefix }}000/"
+          - "  Gatus health board           → http://localhost:{{ port_prefix }}889/"
+          - ""
+          - "Login via configurator: ADMIN / eGov@123 on tenant `{{ bootstrap_tenant }}`."
+          - "Then run the onboarding wizard targeting `{{ personal_tenant_city }}`."
+          - "Boundaries are pre-seeded — pick from them in Phase 4 (Employees)."
+      when: seed_demo_data | bool
+      tags: [always]
+
+    - name: "Print URLs (plain mode)"
+      ansible.builtin.debug:
+        msg:
+          - "━━━ Personal install ready (plain — no demo data) ━━━"
+          - "  digit-ui (esbuild HMR, host) → http://localhost:{{ port_prefix }}080/digit-ui/"
+          - "  configurator (admin SPA)     → http://localhost:{{ port_prefix }}172/configurator/"
+          - "  Kong API gateway             → http://localhost:{{ port_prefix }}000/"
+          - "  Gatus health board           → http://localhost:{{ port_prefix }}889/"
+          - ""
+          - "Login as ADMIN / eGov@123 on tenant `{{ bootstrap_tenant }}`."
+          - "Use the configurator's onboarding wizard to create your own tenant + data."
+          - "Phase 1 = tenant header (what we'd seed via ansible if SEED_DEMO_DATA=true)."
+      when: not (seed_demo_data | bool)
+      tags: [always]

@@ -1,0 +1,140 @@
+---
+# Spawn digit-ui-esbuild as a host-side process for HMR dev.
+#
+# Why not in compose? esbuild.dev.js hardcodes `127.0.0.1` for its proxy
+# upstream (Kong). Inside a docker container that resolves to the container
+# itself, not the host. We'd have to patch esbuild.dev.js to honor a
+# PROXY_HOST env-var. Until that lands upstream, run on host.
+#
+# What this task does:
+#   1. Confirm sibling repo exists at egov/digit-ui-esbuild/
+#   2. Install npm deps if missing
+#   3. Ensure public/vendor/*.css is populated (predev fetches from unpkg)
+#   4. Fetch globalConfigs.<personal_tenant_city>.js so SPA hits the right tenant
+#   5. Spawn `node esbuild.dev.js` backgrounded, write pid + log to .dev-logs/
+#
+# Idempotent: skips install/build if cache is hot. Re-running noops if pid is alive.
+
+- name: "Locate digit-ui-esbuild sibling repo"
+  ansible.builtin.set_fact:
+    ui_esbuild_dir: "{{ playbook_dir }}/../../../egov/digit-ui-esbuild"
+
+- name: "Confirm digit-ui-esbuild exists at {{ ui_esbuild_dir }}"
+  ansible.builtin.stat:
+    path: "{{ ui_esbuild_dir }}/esbuild.dev.js"
+  register: ui_esbuild_stat
+  failed_when: not ui_esbuild_stat.stat.exists
+
+- name: "Install digit-ui-esbuild deps if node_modules missing"
+  ansible.builtin.command: npm install --legacy-peer-deps
+  args:
+    chdir: "{{ ui_esbuild_dir }}"
+    creates: "{{ ui_esbuild_dir }}/node_modules/.package-lock.json"
+  register: npm_install
+  changed_when: npm_install.rc == 0
+
+- name: "Vendor digit-ui CSS (one-time predev) if missing"
+  ansible.builtin.command: node scripts/vendor-digit-ui-css.js
+  args:
+    chdir: "{{ ui_esbuild_dir }}"
+    creates: "{{ ui_esbuild_dir }}/public/vendor/digit-ui-css.css"
+  register: vendor_css
+  changed_when: vendor_css.rc == 0
+
+- name: "Write a globalConfigs.js variant for the local tenant"
+  ansible.builtin.copy:
+    dest: "{{ ui_esbuild_dir }}/globalConfigs.personal-install.js"
+    mode: "0644"
+    content: |
+      // Auto-written by personal-install ansible. Do not commit.
+      // Points the SPA at the local stack and the personal-install tenant.
+      var globalConfigs = (function () {
+        var stateTenantId = "{{ personal_tenant_root if seed_demo_data | bool else bootstrap_tenant }}";
+        var contextPath = "digit-ui";
+        var gmaps_api_key = "";
+        var finEnv = "dev";
+        var centralInstanceEnabled = false;
+        var footerBWLogoURL = "";
+        var footerLogoURL = "";
+        var digitHomeURL = "";
+        var assetS3Bucket = "";
+        var configModuleName = "commonMDMSConfig";
+        var localeRegion = "{{ 'KE' if seed_demo_data | bool else 'IN' }}";
+        var localeDefault = "en";
+        var mdmsContext = "mdms-v2";
+        var hrmsContext = "egov-hrms";
+        var invalidEmployeeRoles = ["SYSTEM"];
+        var authProvider = "digit";
+        var pgrBoundaryLowestLevel = "Ward";
+        var pgrBoundaryHighestLevel = "County";
+        var hierarchyType = "ADMIN";
+        var boundaryType = "Ward";
+        var getConfig = function (key) {
+          if (key === "STATE_LEVEL_TENANT_ID") return stateTenantId;
+          else if (key === "GMAPS_API_KEY") return gmaps_api_key;
+          else if (key === "FIN_ENV") return finEnv;
+          else if (key === "ENABLE_SINGLEINSTANCE") return centralInstanceEnabled;
+          else if (key === "DIGIT_FOOTER_BW") return footerBWLogoURL;
+          else if (key === "DIGIT_FOOTER") return footerLogoURL;
+          else if (key === "DIGIT_HOME_URL") return digitHomeURL;
+          else if (key === "ASSET_S3_BUCKET") return assetS3Bucket;
+          else if (key === "CONFIG_MODULE_NAME") return configModuleName;
+          else if (key === "LOCALE_REGION") return localeRegion;
+          else if (key === "LOCALE_DEFAULT") return localeDefault;
+          else if (key === "MDMS_CONTEXT") return mdmsContext;
+          else if (key === "HRMS_CONTEXT") return hrmsContext;
+          else if (key === "INVALID_EMPLOYEE_ROLES") return invalidEmployeeRoles;
+          else if (key === "AUTH_PROVIDER") return authProvider;
+          else if (key === "PGR_BOUNDARY_LOWEST_LEVEL") return pgrBoundaryLowestLevel;
+          else if (key === "PGR_BOUNDARY_HIGHEST_LEVEL") return pgrBoundaryHighestLevel;
+          else if (key === "HIERARCHY_TYPE") return hierarchyType;
+          else if (key === "BOUNDARY_TYPE") return boundaryType;
+        };
+        return { getConfig: getConfig };
+      })();
+      window.globalConfigs = globalConfigs;
+
+- name: "Check if anything is already listening on :{{ port_prefix }}080 (esbuild target port)"
+  ansible.builtin.shell: |
+    lsof -iTCP:{{ port_prefix }}080 -sTCP:LISTEN -P -n 2>/dev/null | awk 'NR>1{print $1, $2}' | head -1 || true
+  args:
+    executable: /bin/bash
+  register: existing_pid
+  changed_when: false
+  failed_when: false
+
+- name: "Skip relaunch if our esbuild already on :{{ port_prefix }}080"
+  ansible.builtin.debug:
+    msg: "✓ digit-ui-esbuild already on :{{ port_prefix }}080 ({{ existing_pid.stdout }})"
+  when: existing_pid.stdout | length > 0
+
+- name: "Spawn digit-ui-esbuild (PORT={{ port_prefix }}080, GLOBAL_CONFIGS=… personal-install variant)"
+  ansible.builtin.shell: |
+    cd "{{ ui_esbuild_dir }}"
+    mkdir -p "{{ playbook_dir }}/../.dev-logs"
+    nohup env \
+      PORT="{{ port_prefix }}080" \
+      PROXY_PORT="{{ port_prefix }}000" \
+      GLOBAL_CONFIGS="{{ ui_esbuild_dir }}/globalConfigs.personal-install.js" \
+      node esbuild.dev.js \
+      > "{{ playbook_dir }}/../.dev-logs/digit-ui-esbuild.log" 2>&1 &
+    echo $!
+  args:
+    executable: /bin/bash
+  register: spawn_result
+  changed_when: true
+  when: existing_pid.stdout | length == 0
+
+- name: "Wait for esbuild to bind {{ port_prefix }}080"
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ port_prefix }}080"
+    timeout: 60
+  when: existing_pid.stdout | length == 0
+
+- name: "Confirm esbuild ready"
+  ansible.builtin.debug:
+    msg: |
+      ✓ digit-ui-esbuild listening on http://localhost:{{ port_prefix }}080/digit-ui/
+        log: .dev-logs/digit-ui-esbuild.log
+        listener: {{ existing_pid.stdout if existing_pid.stdout | length > 0 else (spawn_result.stdout | default('')) }}

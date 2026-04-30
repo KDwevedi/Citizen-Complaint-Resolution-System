@@ -1,0 +1,41 @@
+---
+# Seed the PGR workflow + role-action mappings.
+#
+# At this point boundaries, MDMS, and employees are in place. The remaining
+# pieces wire PGR-specific config:
+#
+#   1. Workflow business service for PGR (state machine: PENDINGFORASSIGNMENT
+#      → ASSIGNED → RESOLVED → CLOSEDAFTERRESOLUTION). Delivered via:
+#        POST /egov-workflow-v2/businessservice/_create
+#        Body source: data/mdms/Workflow/BusinessService.json (already loaded
+#        in step 04 if Workflow module is included; some deployments need a
+#        separate workflow-engine call to register the state machine itself).
+#
+#   2. Role-action mappings: which API endpoint each role can call.
+#        POST /access/v1/actions/mdms/_create
+#        Body source: data/mdms/ACCESSCONTROL-ROLEACTIONS/<file>.json
+#
+#   3. Optional: SLA configs in data/mdms/RAINMAKER-PGR/UIConstants.json — a
+#      duration_ms widget on the configurator hits these.
+#
+# Idempotent: workflow business service _search before _create; role-actions
+# are upsert-style server-side.
+#
+# TODO: write the actual tasks. Most of the data is already covered by step 04
+# if Workflow + ACCESSCONTROL-* MDMS modules are loaded — this file mostly
+# exists for any state-machine-engine calls that don't go through MDMS.
+
+- name: "TODO — PGR workflow + role-action seeding"
+  ansible.builtin.debug:
+    msg: |
+      Most of this is implicit if step 04 (MDMS seed) loads
+      Workflow.BusinessService and ACCESSCONTROL-ROLEACTIONS.
+      Verify after seeding:
+        - GET /egov-workflow-v2/businessservice/_search?tenantId=ke.nairobi&businessServices=PGR
+        - Confirm 11 states (PENDINGFORASSIGNMENT → ASSIGNED → … → CLOSED*)
+        - Confirm role-action coverage by attempting a CITIZEN /pgr-services
+          POST as a non-admin user — should succeed.
+
+      If state machine call needs to be separate (older DIGIT versions): POST
+      to /egov-workflow-v2/businessservice/_create with the BusinessService
+      body extracted from the MDMS file.

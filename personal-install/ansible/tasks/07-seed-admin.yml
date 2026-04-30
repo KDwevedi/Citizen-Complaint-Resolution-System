@@ -1,0 +1,64 @@
+---
+# Create a SUPERUSER on the city tenant so login via /digit-ui/employee works
+# even before the configurator's onboarding flow has run. The wizard creates
+# its own admin during Phase 4 anyway; this is the bootstrap so you can SEE
+# the wizard while logged into the right tenant.
+#
+# DIGIT API:
+#   POST /user/users/_createnovalidate    (bootstrap path — bypasses OTP rules)
+#
+# Idempotent: searches first by userName under the target tenant; only
+# creates if absent.
+
+- name: "Search for existing {{ city_admin_username | default('ADMIN') }} on {{ personal_tenant_city }}"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/user/_search"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: "{{ request_info_base }}"
+      tenantId: "{{ personal_tenant_city }}"
+      userName: "{{ city_admin_username | default('ADMIN') }}"
+    status_code: [200]
+    return_content: true
+  register: city_admin_search
+
+- name: "Create SUPERUSER on {{ personal_tenant_city }} if absent"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/user/users/_createnovalidate"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: "{{ request_info_base }}"
+      user:
+        userName: "{{ city_admin_username | default('ADMIN') }}"
+        name: "{{ (personal_tenant_city | split('.'))[-1] | title }} Admin"
+        mobileNumber: "{{ city_admin_mobile | default('9999999998') }}"
+        type: "EMPLOYEE"
+        tenantId: "{{ personal_tenant_city }}"
+        password: "{{ city_admin_password | default('eGov@123') }}"
+        active: true
+        # Roles must reference a tenant where the role MDMS records exist.
+        # Until the configurator onboarding wizard registers roles under
+        # `personal_tenant_city`, point at `bootstrap_tenant` (`pg`) which
+        # has them from the CCRS local-setup boot.
+        roles:
+          - { code: "SUPERUSER",  name: "Super User", tenantId: "{{ bootstrap_tenant }}" }
+          - { code: "EMPLOYEE",   name: "Employee",   tenantId: "{{ bootstrap_tenant }}" }
+          - { code: "GRO",        name: "Grievance Routing Officer", tenantId: "{{ bootstrap_tenant }}" }
+    status_code: [200, 201, 202]
+    return_content: true
+  register: city_admin_create
+  when: (city_admin_search.json.user | default([])) | length == 0
+
+- name: "Confirm city-tenant admin"
+  ansible.builtin.debug:
+    msg: >-
+      {% if (city_admin_search.json.user | default([])) | length > 0 %}
+      ✓ {{ city_admin_username | default('ADMIN') }} already exists on {{ personal_tenant_city }} — left alone.
+      {% else %}
+      ✓ created {{ city_admin_username | default('ADMIN') }} on {{ personal_tenant_city }}
+      (login at /digit-ui/employee with tenantId={{ personal_tenant_city }} / password={{ city_admin_password | default('eGov@123') }})
+      {% endif %}

@@ -1,0 +1,85 @@
+---
+# Create the root tenant + city tenant in MDMS.
+#
+# CCRS local-setup ships with `pg` as the bootstrap tenant. To use anything
+# else (`ke`, `ke.nairobi`, `in.mumbai`, …) we register it with MDMS first.
+#
+# DIGIT API:
+#   POST /mdms-v2/v2/_create/tenant.tenants
+#   body: { RequestInfo, Mdms: { tenantId, schemaCode, uniqueIdentifier, data } }
+#
+# Idempotent: tolerate 409 (already exists) and 400 (some servers return 400
+# when uniqueIdentifier is taken). Search-then-create avoids the noise.
+
+- name: "Search existing tenant.tenants records under bootstrap tenant"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/mdms-v2/v2/_search"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: "{{ request_info_base }}"
+      MdmsCriteria:
+        tenantId: "{{ bootstrap_tenant }}"
+        schemaCode: "tenant.tenants"
+        limit: 1000
+    status_code: [200]
+    return_content: true
+  register: tenants_search
+
+- name: "Compute set of existing tenant codes"
+  ansible.builtin.set_fact:
+    existing_tenant_codes: "{{ (tenants_search.json.mdms | default([])) | map(attribute='data.code') | list }}"
+
+- name: "Show what's there"
+  ansible.builtin.debug:
+    msg: "Existing tenants on MDMS: {{ existing_tenant_codes | join(', ') }}"
+
+- name: "Create root tenant ({{ personal_tenant_root }})"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/mdms-v2/v2/_create/tenant.tenants"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: "{{ request_info_base }}"
+      Mdms:
+        # Schema lives at bootstrap_tenant (pg in CCRS local-setup); records
+        # describing other tenants are stored under the same. data.tenantId is
+        # what makes the record describe the new tenant.
+        tenantId: "{{ bootstrap_tenant }}"
+        schemaCode: "tenant.tenants"
+        uniqueIdentifier: "Tenant.{{ personal_tenant_root }}"
+        data:
+          code: "{{ personal_tenant_root }}"
+          name: "{{ personal_tenant_root | upper }}"
+          tenantId: "{{ personal_tenant_root }}"
+          city:
+            code: "{{ personal_tenant_root | upper }}"
+            name: "{{ personal_tenant_root | upper }}"
+    status_code: [200, 201, 202]
+  when: personal_tenant_root not in existing_tenant_codes
+
+- name: "Create city tenant ({{ personal_tenant_city }})"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/mdms-v2/v2/_create/tenant.tenants"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: "{{ request_info_base }}"
+      Mdms:
+        tenantId: "{{ bootstrap_tenant }}"
+        schemaCode: "tenant.tenants"
+        uniqueIdentifier: "{{ personal_tenant_city }}"
+        data:
+          code: "{{ personal_tenant_city }}"
+          name: "{{ (personal_tenant_city | split('.'))[-1] | title }}"
+          tenantId: "{{ personal_tenant_city }}"
+          type: "CITY"
+          city:
+            code: "{{ (personal_tenant_city | upper | replace('.', '_')) }}"
+            name: "{{ (personal_tenant_city | split('.'))[-1] | title }}"
+            districtName: "{{ (personal_tenant_city | split('.'))[-1] | title }}"
+    status_code: [200, 201, 202]
+  when: personal_tenant_city not in existing_tenant_codes

@@ -1,0 +1,47 @@
+---
+# Seed MDMS records from data/mdms/<schemaModule>/<file>.json.
+#
+# Source files have shape:
+#   [ { "tenantId": "ke.nairobi", "data": { ...record... } }, ... ]
+#
+# DIGIT API:
+#   POST /mdms-v2/v2/_create/{schemaCode}
+#   body: { RequestInfo, Mdms: { tenantId, schemaCode, uniqueIdentifier, data } }
+#
+# uniqueIdentifier convention: defaults to data.code, falls back to data.name,
+# then data.serviceCode (PGR ServiceDefs use this).
+#
+# Idempotent via _search: skip records whose uniqueIdentifier already exists
+# under the same (tenantId, schemaCode).
+
+- name: "Walk seed_mdms_dir for module folders"
+  ansible.builtin.find:
+    paths: "{{ seed_mdms_dir }}"
+    recurse: false
+    file_type: directory
+  register: mdms_modules
+
+- name: "TODO — for each module folder, find its JSON files, derive schemaCode, POST records"
+  ansible.builtin.debug:
+    msg: |
+      Next step: for each module dir under data/mdms/ (e.g. RAINMAKER-PGR,
+      common-masters, Workflow), iterate files. Each file maps to one schema:
+      filename without `.json` is the schema name. SchemaCode is
+      `{module}.{schema}`, e.g. `RAINMAKER-PGR.ServiceDefs`.
+
+      Per-record:
+        1. Compute uniqueIdentifier = data.code | data.name | data.serviceCode
+        2. GET /mdms-v2/v2/_search to dedupe (filter by uniqueIdentifier)
+        3. If absent, POST /mdms-v2/v2/_create/{schemaCode}
+
+      Watch for:
+        - PGR ServiceDefs need departments to exist first → load order matters.
+          Recommended order: tenant, common-masters, ACCESSCONTROL-*,
+          egov-hrms, Workflow, RAINMAKER-PGR, CRS-ADMIN-CONSOLE, INBOX,
+          DataSecurity, egov-location.
+        - mdms-v2 _update needs userInfo.tenantId set on the request — already
+          covered by request_info_base.
+        - Some schemas auto-generate uniqueIdentifier server-side (e.g.
+          tenant.tenants where it's `tenantId` itself). Special-case those.
+  loop: "{{ mdms_modules.files | map(attribute='path') | list }}"
+  loop_control: { label: "{{ item | basename }}" }
