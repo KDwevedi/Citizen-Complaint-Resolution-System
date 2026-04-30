@@ -12,8 +12,9 @@ fi
 
 PROJECT="${COMPOSE_PROJECT_NAME:-naipepea-personal}"
 COMPOSE_FILES=(-f "$ROOT/stack/docker-compose.local.yaml"
-               -f "$ROOT/stack/docker-compose.naipepea.yaml"
                -f "$ROOT/stack/docker-compose.extra.yaml")
+[[ "${USE_NAIPEPEA_IMAGES:-false}" == "true" ]] && \
+  COMPOSE_FILES+=(-f "$ROOT/stack/docker-compose.naipepea.yaml")
 
 flag=""
 [[ "${1:-}" == "--volumes" || "${1:-}" == "-v" ]] && flag="-v"
