@@ -94,7 +94,15 @@ var footerLogoURL = "https://...your-colour-logo.png";
 var digitHomeURL = "https://your-back-to-home";
 ```
 
-For personal-install, edit `digit-ui-esbuild/globalConfigs.personal-install.js` (auto-written by ansible 08; safe to overwrite). For naipepea, edit `/opt/digit-ui-esbuild/globalConfigs.js` and `git pull` re-applies if you've committed it.
+**Where this file actually lives on personal-install** (matters for any `globalConfigs.*` edit, not just footer logos):
+
+The docker `digit-ui` container at `:16080` bind-mounts `local-setup/nginx/globalConfigs.js` from the host into `/var/web/digit-ui/globalConfigs.js` inside. The SPA fetches `/digit-ui/globalConfigs.js` and reads what the host file currently contains. Three things follow:
+
+1. **Editing the host file is enough** — bind mount reflects changes immediately, no rebuild needed.
+2. **Atomic writes (sed -i, lineinfile, vite-style temp+rename) break the bind mount** because they swap the inode the container originally bound. Symptom: nginx returns `404 No such file or directory` for `globalConfigs.js`. Fix: `docker restart digit-ui` re-binds the new inode. Documented in `../DEPLOYMENT-NOTES.md` §3.18.
+3. **Ansible task in `playbook.yml`** patches `stateTenantId` + `localeRegion` based on `PERSONAL_TENANT_ROOT` from `config.env` when `SEED_DEMO_DATA=true`, then restarts digit-ui. Re-running `up.sh seed` resets the file to the personal-install variant. If you've made other edits that you want preserved, edit the file under a different tenant root or set `SEED_DEMO_DATA=false`.
+
+For naipepea, edit `/opt/digit-ui-esbuild/globalConfigs.js` and `git pull` re-applies if you've committed it.
 
 These are read via `globalConfigs.getConfig('DIGIT_FOOTER_BW')` etc. — UPPER_SNAKE keys; arbitrary names won't work.
 
