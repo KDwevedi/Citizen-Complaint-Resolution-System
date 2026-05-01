@@ -265,3 +265,45 @@ services:
     paths:
     - /jupyter
     strip_path: false
+
+# OTP mocks — mirrors naipepea kong.yml. Returns hardcoded success so the citizen
+# /digit-ui register flow advances without a real SMS gateway.
+- name: user-otp-mock
+  url: http://localhost:9999
+  tags: [core, auth, mock]
+  routes:
+  - name: user-otp-route
+    paths: [/user-otp]
+    strip_path: false
+  plugins:
+  - name: request-termination
+    config:
+      status_code: 200
+      content_type: application/json
+      body: '{"ResponseInfo":{"apiId":"Rainmaker","ver":".01","ts":"","resMsgId":"uief87324","msgId":"","status":"successful"},"otp":{"otp":"","UUID":"","isValidationSuccessful":true}}'
+- name: otp-validate-mock
+  url: http://localhost:9999
+  tags: [core, auth, mock]
+  routes:
+  - name: otp-validate-route
+    paths: [/otp]
+    strip_path: false
+  plugins:
+  - name: request-termination
+    config:
+      status_code: 200
+      content_type: application/json
+      body: '{"ResponseInfo":{"apiId":"Rainmaker","ver":".01","ts":"","resMsgId":"uief87324","msgId":"","status":"successful"},"otp":{"otp":"","UUID":"","isValidationSuccessful":true}}'
+- name: user-event-mock
+  url: http://localhost:9999
+  tags: [core, mock]
+  routes:
+  - name: user-event-route
+    paths: [/egov-user-event]
+    strip_path: false
+  plugins:
+  - name: request-termination
+    config:
+      status_code: 200
+      content_type: application/json
+      body: '{"ResponseInfo":{"apiId":"Rainmaker","ver":".01","ts":"","resMsgId":"uief87324","msgId":"","status":"successful"},"events":[]}'
