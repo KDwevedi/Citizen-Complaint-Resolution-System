@@ -315,7 +315,15 @@ services:
       MDMS_V2_HOST: http://egov-mdms-service:8094
       EGOV_MDMS_V2_HOST: http://egov-mdms-service:8094
       MDMS_SEARCH_ENDPOINT: /mdms-v2/v1/_search
-      EGOV_OTP_HOST: http://egov-user:8107
+      EGOV_OTP_HOST: http://kong:8000
+      # Mirrors naipepea — egov-user accepts citizen OTP "123456" regardless
+      # of what /otp/v1/_validate says. Without this, citizens can't log in
+      # via the OTP screen on personal-install (our Kong mock for /otp never
+      # writes to the eg_token table that real OTP validation compares against).
+      # Toggle ENABLED=false to require real OTP validation (won't work
+      # without an SMS gateway + populated eg_token, so leave true).
+      CITIZEN_LOGIN_PASSWORD_OTP_FIXED_ENABLED: "true"
+      CITIZEN_LOGIN_PASSWORD_OTP_FIXED_VALUE: "123456"
       EGOV_ENC_HOST: http://egov-enc-service:1234
       EGOV_IDGEN_HOST: http://egov-idgen:8088
       EGOV_ACCESSCONTROL_HOST: http://egov-accesscontrol:8090

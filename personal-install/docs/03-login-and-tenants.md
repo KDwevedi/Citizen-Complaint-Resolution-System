@@ -33,6 +33,51 @@ user.roles ∩ MDMS_role_definitions ∩ MDMS_role_action_mappings
 
 If the user's `roles[].tenantId` points to a tenant that doesn't have that role's MDMS record, you get `INVALID_ROLE`. This is the #1 cause of "I just created an admin and it can't log in."
 
+## Citizen OTP login — the four-layer config
+
+The citizen `/digit-ui/citizen/login` flow on personal-install needs **four** distinct config layers in agreement to produce a working session token. Skip any one of them and you see a different failure mode (404 from nginx, 404 from Kong, OOM, OTP-rejected, etc.). All four mirror naipepea production; the bundle below is shipped on `feat/personal-install`.
+
+| Layer | File | What it does | What breaks if missing |
+|---|---|---|---|
+| 1. Kong mock for `/otp/*` and `/user-otp/*` | `local-setup/kong/kong.yml` (`otp-validate-mock`, `user-otp-mock` services) | `request-termination` plugin returns hardcoded `{"otp":"","isValidationSuccessful":true}` body. No real OTP service, no SMS gateway. | `POST /otp/v1/_send` → 404 from Kong; SPA falls through to `/citizen/register/name` |
+| 2. digit-ui nginx proxy regex | `local-setup/nginx/digit-ui.conf` | Forwards `/otp`, `/user-otp`, `/egov-user-event` from `:16080` to Kong on `:16000`. | Same 404 — but from this nginx layer, before Kong is reached |
+| 3. `egov-user` OTP host points at Kong | `local-setup/docker-compose.yaml`, env `EGOV_OTP_HOST: http://kong:8000` | Routes egov-user's internal OTP-validate call through Kong, hits the mock from layer 1. Default of `http://egov-user:8107` makes egov-user call itself, infinite loop. | Login OAuth times out / 5xx |
+| 4. Citizen OTP fixed value | `local-setup/docker-compose.yaml`, env on egov-user: `CITIZEN_LOGIN_PASSWORD_OTP_FIXED_ENABLED: "true"` + `CITIZEN_LOGIN_PASSWORD_OTP_FIXED_VALUE: "123456"` | egov-user accepts citizen OTP "123456" directly — bypasses the `eg_token` row check that would normally compare against the OTP `_send` wrote. Our Kong mock doesn't write that row. | `/user/oauth/token` returns 400 "Invalid login credentials" no matter what OTP you type |
+
+**The hardcoded OTP value for personal-install is `123456`.** That's the value to type at the `/digit-ui/citizen/login/otp` screen after entering a mobile number. Same as naipepea (which also uses `123456`).
+
+To change it: edit `CITIZEN_LOGIN_PASSWORD_OTP_FIXED_VALUE` in `local-setup/docker-compose.yaml` and `docker compose up -d --force-recreate --no-deps egov-user`.
+
+To turn it off entirely (require real OTP): set `CITIZEN_LOGIN_PASSWORD_OTP_FIXED_ENABLED: "false"`. Won't actually work on personal-install yet — needs a real OTP _validate flow that checks against eg_token rows from a real `_send`. So leave it on.
+
+### Verifying the chain end-to-end
+
+```bash
+# 1. Kong layer — should return 200 with the mock body
+curl -X POST http://localhost:16000/otp/v1/_send \
+  -H 'Content-Type: application/json' \
+  -d '{"otp":{"mobileNumber":"9876543210","tenantId":"pg","type":"login","userType":"CITIZEN"}}'
+# expect: {"ResponseInfo":{...},"otp":{"otp":"","isValidationSuccessful":true}}
+
+# 2. nginx layer — same body via the SPA's port :16080
+curl -X POST http://localhost:16080/otp/v1/_send -H 'Content-Type: application/json' -d '{}'
+# expect: same 200 body
+
+# 3+4. End-to-end OAuth — exchange OTP for a token
+curl -X POST http://localhost:16000/user/oauth/token \
+  -H 'Authorization: Basic ZWdvdi11c2VyLWNsaWVudDo=' \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'grant_type=password&username=9876543210&password=123456&scope=read&tenantId=pg&userType=CITIZEN'
+# expect: HTTP 200 with access_token (after the citizen user exists at the tenant)
+# OR:    HTTP 400 with "User not found" if the mobile isn't registered yet —
+# that's a separate issue from OTP; the citizen must exist first.
+```
+
+### When all four are right but you still get 400
+
+- **Citizen user doesn't exist yet at the tenant** — egov-user requires the citizen record to exist; OTP login can't *register* them, only authenticate. Use the Login flow's "register" path (digit-ui's `/citizen/register/name` page captures name + creates the user) before the OTP login will work.
+- **Wrong tenant** — citizens registered at `ke.nairobi` won't auth at `tenantId=pg`. Match the tenant on `_send`, `/user/oauth/token`, and the SPA's `Citizen.tenant-id` localStorage entry.
+
 ## Configurator's stub auth (and how to point it at a real tenant)
 
 The configurator SPA is the first thing most operators see. **It does not show a login screen on first load.** Instead, on boot it auto-populates `localStorage['crs-auth-state']` with a stub user:
