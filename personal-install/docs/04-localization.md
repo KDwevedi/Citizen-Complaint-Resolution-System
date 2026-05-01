@@ -60,6 +60,152 @@ location.reload();
 
 The `Digit.Locale.*` keys store per-(module, locale, tenant) bundles. Newer client code adds `liveStored` / `expiredStored` semantics; older code is stricter — clearing all `Digit.Locale.*` always works.
 
+## Common task: add a new language for a new country (e.g. Portuguese for Mozambique)
+
+A "new language" is really three artifacts in three different stores. Get all three in agreement and the dropdown shows the new option, the SPA fetches it on selection, and labels resolve. Skip any one and you get a half-broken state (option visible but no strings, or strings present but option missing, or strings present but SPA still asks for the wrong locale).
+
+The locale code convention is `<lang>_<COUNTRY>` — `pt_MZ` for Mozambique-Portuguese. Use the [ISO-639-1 lang code] + [ISO-3166-1 alpha-2 country code]. Lowercase lang, uppercase country.
+
+### Step 1: Add the language to the picker dropdown — `common-masters.StateInfo.languages`
+
+The citizen `/citizen/select-language` page reads its options from `common-masters.StateInfo.languages` MDMS. The configurator now ships a **StateInfo edit page** at `/configurator/manage/state-info/` (or under Tenant Management → State Info — depends on the sidebar layout). Find the active StateInfo record, edit its `languages` array, add a row:
+
+```json
+{ "label": "Português", "value": "pt_MZ" }
+```
+
+Save. Cache-bust the SPA (devtools console: clear `Digit.Locale.*` + reload) and the language picker now shows Português.
+
+**Direct API alternative** (in case the configurator UI has a quirk):
+
+```bash
+TOKEN=$(./get-token.sh)  # from 03-login-and-tenants.md
+
+# 1. _search to find the existing StateInfo record's uniqueIdentifier
+curl -s -X POST http://localhost:16000/mdms-v2/v2/_search \
+  -H "Content-Type: application/json" \
+  -d "{\"RequestInfo\":{\"authToken\":\"$TOKEN\"},\"MdmsCriteria\":{\"tenantId\":\"pg\",\"schemaCode\":\"common-masters.StateInfo\"}}" \
+  | jq '.mdms[0]'
+
+# 2. _update with the modified data (add to languages[] array)
+curl -X POST http://localhost:16000/mdms-v2/v2/_update/common-masters.StateInfo \
+  -H "Content-Type: application/json" \
+  -d '{
+    "RequestInfo": {"authToken":"'$TOKEN'", "userInfo":{"tenantId":"pg",...}},
+    "Mdms": {
+      "tenantId": "pg",
+      "schemaCode": "common-masters.StateInfo",
+      "uniqueIdentifier": "<from step 1>",
+      "data": {
+        ...existing fields...,
+        "languages": [
+          ...existing entries...,
+          {"label":"Português","value":"pt_MZ"}
+        ]
+      }
+    }
+  }'
+```
+
+`_update` requires `userInfo.tenantId` in the RequestInfo (mdms-v2 quirk). Without it, returns `MISSING_TENANT_ID`.
+
+### Step 2: Bulk-load the strings for the new locale
+
+The configurator now has a **localization bulk import** page at `/configurator/manage/localization/` with a Download Template button + an Upload pane. The XLSX template has columns: `code`, `module`, `locale`, `tenantId`, `message`. Fill in your translations, set `locale=pt_MZ` for every row, set `tenantId` to whichever tenant the SPA reads from (`pg` on personal-install; `ke.nairobi` or whatever you've configured in `globalConfigs.js`'s `STATE_LEVEL_TENANT_ID`). Upload.
+
+The configurator handles the dedup-by-code-in-batch quirk by batching the upload one module at a time, server-side.
+
+**Export** (handy for translation handoff): the same page has an Export button — pick a source locale (e.g. `en_IN` if you want English-as-source for translation work), and you get an XLSX with all strings for that (locale, tenant). Open in your translation tool, fill the column for the new locale, upload back.
+
+**Direct API alternative**:
+
+```bash
+# Per-module batch — 4-5 modules total. Send each one as a separate _upsert call
+# to dodge the dedup-by-code-in-batch bug (DEV-LOG §12).
+for module in rainmaker-common rainmaker-pgr rainmaker-hr rainmaker-workbench; do
+  curl -X POST http://localhost:16000/localization/messages/v1/_upsert \
+    -H "Content-Type: application/json" \
+    -d '{
+      "RequestInfo": {"authToken":"'$TOKEN'"},
+      "tenantId": "pg",
+      "messages": [
+        {"code":"CS_COMMON_HELPLINE","module":"'$module'","locale":"pt_MZ","message":"Linha de apoio"},
+        ...
+      ]
+    }'
+done
+```
+
+The `messages[]` array is per-locale: send all `pt_MZ` rows for one module in one call, then move to the next module.
+
+For bulk translation work, naipepea has `translate_rest.py` + `resync-nairobi.py` on the box (DEV-LOG §12) — they batch by module and use Google Translate to fill missing locales from a source locale. Pattern adapts straightforwardly:
+
+```bash
+ssh naipepea "cd /opt/egov && PG_PORT=15432 python3 translate_rest.py \
+    --source-locale en_IN --target-locale pt_MZ \
+    --source-tenant ke --target-tenant <your-tenant>"
+```
+
+(That tool isn't yet adapted on personal-install — copy from `/opt/egov` if you want to use it locally; for one-off Portuguese seeding the configurator's bulk-import is simpler.)
+
+### Step 3: Point the SPA at the new locale
+
+The SPA constructs its locale string as `<localeDefault>_<localeRegion>`. To make the citizen UI default to `pt_MZ`:
+
+```js
+// local-setup/nginx/globalConfigs.js  (bind-mounted into the digit-ui container)
+var localeDefault = "pt";
+var localeRegion = "MZ";
+```
+
+After the edit: `docker restart digit-ui` (the bind-mount inode swap from atomic write — DEPLOYMENT-NOTES §3.18 — needs the restart).
+
+If `pt_MZ` is just an alternative the user can pick (vs the default), leave `globalConfigs.js` alone and let the user select Português from the dropdown after step 1 — the SPA handles the switch via `selectedLanguage` localStorage.
+
+### Step 4: Cache-bust everywhere
+
+```bash
+# server-side cache (Redis hashes) — busts the in-memory localization service cache
+docker exec digit-redis redis-cli DEL messages computedMessages
+docker restart egov-localization
+
+# wait for the JVM to come back up
+until [ "$(curl -sS -o /dev/null -w '%{http_code}' -X POST 'http://localhost:16000/localization/messages/v1/_search?locale=pt_MZ&module=rainmaker-common&tenantId=pg' -H 'Content-Type: application/json' -d '{}')" = "200" ]; do sleep 5; done
+```
+
+```js
+// browser localStorage — needs to be cleared per-session
+Object.keys(localStorage).filter(k=>k.startsWith('Digit.Locale.')).forEach(k=>localStorage.removeItem(k))
+location.reload()
+```
+
+### Step 5: Verify
+
+```bash
+# strings landed?
+curl -s -X POST 'http://localhost:16000/localization/messages/v1/_search?locale=pt_MZ&module=rainmaker-common&tenantId=pg' \
+  -H 'Content-Type: application/json' -d '{}' \
+  | jq '.messages | length'
+# expect: number of rows you uploaded
+
+# language in the dropdown?
+curl -s -X POST http://localhost:16000/mdms-v2/v2/_search \
+  -H "Content-Type: application/json" \
+  -d "{\"RequestInfo\":{\"authToken\":\"$TOKEN\"},\"MdmsCriteria\":{\"tenantId\":\"pg\",\"schemaCode\":\"common-masters.StateInfo\"}}" \
+  | jq '.mdms[0].data.languages'
+# expect: includes {"label":"Português","value":"pt_MZ"}
+
+# SPA rendering?
+# Open http://localhost:16080/digit-ui/citizen/select-language → select Português → labels render in Portuguese
+```
+
+### Common failures
+
+- **Dropdown shows new language but labels don't switch on selection** → SPA's `Digit.Locale.<locale>.*` localStorage cached the old empty result. Clear via the snippet in step 4.
+- **Selection works but labels show raw upper-snake** → strings weren't actually inserted. `_search` to confirm row count > 0; if 0, the upload silently dropped them (likely the dedup-by-code-in-batch bug — re-upload one module at a time).
+- **`_search` 200s but returns empty** even though the DB has rows → server cache was poisoned during a previous OOM. Run the cache-bust in step 4.
+- **SPA hangs for ~55s on every locale switch** → no rows for that (tenant, locale, module) combo; localization service does a full table scan on misses. Either seed the strings or revert to a locale that has data.
+
 ## Common task: fix a raw-key leak
 
 Symptom: UI shows `CS_LOGIN_REGISTER_WITH_EMAIL` literally instead of "Login or register with email".
