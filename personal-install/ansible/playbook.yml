@@ -106,6 +106,14 @@
           tags: [pgr-mv, db, seed]
       tags: [pgr-mv, db, seed]
 
+    - name: "Seed localizations (copy statea.g/en_IN → digit-ui's tenant so labels resolve)"
+      ansible.builtin.include_tasks:
+        file: tasks/11-seed-localizations.yml
+        apply:
+          tags: [localization, seed]
+      tags: [localization, seed]
+      when: seed_demo_data | bool
+
     - name: "Ensure digit-configurator built + reachable"
       ansible.builtin.include_tasks:
         file: tasks/09-ensure-configurator.yml

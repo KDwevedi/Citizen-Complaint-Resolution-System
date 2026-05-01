@@ -1,0 +1,112 @@
+---
+# Copy localization rows from a source tenant to the target tenant so digit-ui
+# at :{{ port_prefix }}080 has resolvable strings.
+#
+# Why this exists:
+#   - CCRS local-setup ships ~88 rows at pg/en_IN (auth bootstrap minimum).
+#   - The bulk of demo strings live at statea.g/en_IN (~4,500 rows).
+#   - digit-ui's default stateTenantId is "pg" so the SPA queries pg/en_IN
+#     and shows raw upper-snake keys for everything not in those 88 rows
+#     (CS_COMMON_CHOOSE_LANGUAGE, CORE_COMMON_CONTINUE, etc.).
+#   - Naipepea's pattern (4,208 rows at ke/en_IN, 4,208 at ke.nairobi/en_IN)
+#     was built by hand-running translation scripts on the box. Personal-install
+#     can fast-track by copying from the local statea.g bootstrap.
+#
+# What this task does:
+#   1. SOURCE = statea.g (4,500+ en_IN rows from CCRS local-setup bootstrap).
+#   2. DEST   = LOCALIZATION_TENANT (config.env), default = whatever digit-ui's
+#              stateTenantId is set to in stack/nginx/globalConfigs.js — pg by
+#              upstream default.
+#   3. Read SOURCE rows via /localization/messages/v1/_search per module.
+#   4. Upsert into DEST one module per batch (DEV-LOG §12 dedup-by-code-in-batch
+#      bug — server drops duplicate codes within a single _upsert request).
+#
+# Idempotent: _upsert overwrites by (code, module, locale, tenantId). Re-runs
+# pick up new keys but don't duplicate.
+#
+# Skipped when seed_demo_data=false. Tagged `localization, seed` so you can run
+# this in isolation: `./scripts/up.sh seed --tags localization`.
+
+- name: "Set localization source/dest tenants + locale"
+  ansible.builtin.set_fact:
+    # statea.g has 4506 rows but mostly in rainmaker-common; statea root has
+    # broader coverage (rainmaker-common 1475, rainmaker-pgr 1177, rainmaker-hr
+    # 344, rainmaker-workbench 707) which is what citizen + employee UIs need.
+    loc_source_tenant: "{{ lookup('env', 'LOCALIZATION_SOURCE_TENANT') | default('statea', true) }}"
+    loc_dest_tenant: "{{ lookup('env', 'LOCALIZATION_DEST_TENANT') | default('pg', true) }}"
+    loc_locale: "{{ lookup('env', 'LOCALIZATION_LOCALE') | default('en_IN', true) }}"
+
+- name: "Discover modules with rows at {{ loc_source_tenant }}/{{ loc_locale }}"
+  ansible.builtin.shell: |
+    docker exec docker-postgres psql -U egov -d egov -tA -c "
+      SELECT DISTINCT module FROM message
+        WHERE tenantid = '{{ loc_source_tenant }}'
+          AND locale   = '{{ loc_locale }}'
+        ORDER BY module;
+    "
+  args:
+    executable: /bin/bash
+  register: source_modules
+  changed_when: false
+
+- name: "Show source modules"
+  ansible.builtin.debug:
+    msg: "Found {{ source_modules.stdout_lines | length }} modules at {{ loc_source_tenant }}/{{ loc_locale }}: {{ source_modules.stdout_lines | join(', ') }}"
+
+- name: "Bulk copy: SOURCE→DEST, one module per upsert (avoids dedup-by-code bug)"
+  ansible.builtin.shell: |
+    set -e
+    docker exec -i docker-postgres psql -U egov -d egov -tA -v ON_ERROR_STOP=1 <<SQL
+    -- ON CONFLICT (tenantid, locale, module, code) DO NOTHING gives us
+    -- DB-layer idempotency — the unique_message_entry constraint matches.
+    -- Direct INSERT bypasses the server-side _upsert dedup-by-code-in-batch
+    -- bug (DEV-LOG §12) since each (tenantid,locale,module,code) is its own
+    -- row.
+    INSERT INTO message (id, code, module, locale, tenantid, message, createdby, createddate, lastmodifiedby, lastmodifieddate)
+    SELECT gen_random_uuid()::text,
+           code,
+           module,
+           locale,
+           '{{ loc_dest_tenant }}' AS tenantid,
+           message,
+           1,
+           NOW(),
+           1,
+           NOW()
+      FROM message
+     WHERE tenantid = '{{ loc_source_tenant }}'
+       AND locale   = '{{ loc_locale }}'
+       AND module   = '{{ item }}'
+    ON CONFLICT (tenantid, locale, module, code) DO NOTHING;
+    SQL
+  args:
+    executable: /bin/bash
+  loop: "{{ source_modules.stdout_lines | reject('==', '') | list }}"
+  loop_control:
+    label: "{{ item }}"
+  register: copy_module
+  changed_when: "'INSERT 0 0' not in (copy_module.stdout | default(''))"
+
+- name: "Confirm dest now has rows"
+  ansible.builtin.shell: |
+    docker exec docker-postgres psql -U egov -d egov -tA -c "
+      SELECT COUNT(*) FROM message
+       WHERE tenantid = '{{ loc_dest_tenant }}'
+         AND locale   = '{{ loc_locale }}';
+    "
+  args:
+    executable: /bin/bash
+  register: dest_count
+  changed_when: false
+
+- name: "Bust the SPA's localStorage cache by bumping the localization service module list"
+  ansible.builtin.debug:
+    msg: |
+      ✓ {{ loc_dest_tenant }}/{{ loc_locale }} now has {{ dest_count.stdout | trim }} rows
+        (copied from {{ loc_source_tenant }}/{{ loc_locale }} across {{ source_modules.stdout_lines | length }} modules)
+
+      To pick up changes in the running citizen UI:
+        Open DevTools console at http://localhost:{{ port_prefix }}080/digit-ui/
+        Run:
+          Object.keys(localStorage).filter(k=>k.startsWith('Digit.Locale.')).forEach(k=>localStorage.removeItem(k))
+          location.reload()
