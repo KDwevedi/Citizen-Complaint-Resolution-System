@@ -266,8 +266,22 @@ services:
     - /jupyter
     strip_path: false
 
-# OTP mocks — mirrors naipepea kong.yml. Returns hardcoded success so the citizen
-# /digit-ui register flow advances without a real SMS gateway.
+# OTP mocks — mirror naipepea kong.yml. Kong's request-termination plugin
+# returns the body string DIRECTLY without proxying anywhere — the `url:
+# http://localhost:9999` is a placeholder for the declarative-config schema;
+# nothing listens there.
+#
+# The digit-ui SPA only checks HTTP status + isValidationSuccessful flag to
+# decide if OTP send succeeded. The `otp` field value is opaque to
+# /otp/v1/_send (real OTPs only travel via SMS, never in the response).
+#
+# Default body (uncommented below) returns `"otp": ""`. If you'd rather
+# pin a known fixed value (e.g. "000000") so testers can type a specific
+# OTP at the /citizen/login/otp screen, swap the comment markers on the
+# two `body:` lines per service. Note this is cosmetic on this stack —
+# the /otp/v1/_validate endpoint isn't actually checking the user's input
+# against this value (real verification needs egov-user integration,
+# which isn't wired on personal-install yet — see DEPLOYMENT-NOTES).
 - name: user-otp-mock
   url: http://localhost:9999
   tags: [core, auth, mock]
@@ -280,7 +294,10 @@ services:
     config:
       status_code: 200
       content_type: application/json
+      # Default — empty otp value (mirrors naipepea):
       body: '{"ResponseInfo":{"apiId":"Rainmaker","ver":".01","ts":"","resMsgId":"uief87324","msgId":"","status":"successful"},"otp":{"otp":"","UUID":"","isValidationSuccessful":true}}'
+      # Alternative — fixed "000000". Comment out the line above and uncomment this:
+      # body: '{"ResponseInfo":{"apiId":"Rainmaker","ver":".01","ts":"","resMsgId":"uief87324","msgId":"","status":"successful"},"otp":{"otp":"000000","UUID":"","isValidationSuccessful":true}}'
 - name: otp-validate-mock
   url: http://localhost:9999
   tags: [core, auth, mock]
@@ -293,7 +310,10 @@ services:
     config:
       status_code: 200
       content_type: application/json
+      # Default — empty otp value (mirrors naipepea):
       body: '{"ResponseInfo":{"apiId":"Rainmaker","ver":".01","ts":"","resMsgId":"uief87324","msgId":"","status":"successful"},"otp":{"otp":"","UUID":"","isValidationSuccessful":true}}'
+      # Alternative — fixed "000000". Comment out the line above and uncomment this:
+      # body: '{"ResponseInfo":{"apiId":"Rainmaker","ver":".01","ts":"","resMsgId":"uief87324","msgId":"","status":"successful"},"otp":{"otp":"000000","UUID":"","isValidationSuccessful":true}}'
 - name: user-event-mock
   url: http://localhost:9999
   tags: [core, mock]
