@@ -75,8 +75,22 @@ curl -X POST http://localhost:16000/user/oauth/token \
 
 ### When all four are right but you still get 400
 
-- **Citizen user doesn't exist yet at the tenant** — egov-user requires the citizen record to exist; OTP login can't *register* them, only authenticate. Use the Login flow's "register" path (digit-ui's `/citizen/register/name` page captures name + creates the user) before the OTP login will work.
+- **Citizen user doesn't exist yet at the tenant** — egov-user requires the citizen record to exist; OTP login can't *register* them, only authenticate. The SPA at `/citizen/login` doesn't check user existence — it always sends the user to `/otp` after the (mocked-success) OTP send. If the mobile isn't registered, the OAuth call returns 400 "Invalid login credentials". This is identical to naipepea behaviour for non-existent mobiles. The fix is to **register first**:
+  - Use `/digit-ui/citizen/register` (NOT `/login`) → enter mobile + name. SPA hits the registration API which creates the user. Then `/citizen/login` works for that mobile with OTP `123456`.
+  - Or for fastest validation: skip citizens entirely and use `/digit-ui/employee/user/login` with `ADMIN/eGov@123/tenantId=pg`. That bypasses the OTP layer.
 - **Wrong tenant** — citizens registered at `ke.nairobi` won't auth at `tenantId=pg`. Match the tenant on `_send`, `/user/oauth/token`, and the SPA's `Citizen.tenant-id` localStorage entry.
+
+### How to confirm "the OTP layer is working" without the user-existence variable
+
+```bash
+# Find an existing CITIZEN on the tenant
+docker exec docker-postgres psql -U egov -d egov -tA -c \
+  "SELECT username FROM eg_user WHERE type='CITIZEN' AND tenantid='pg' AND active=true LIMIT 1;"
+
+# Try OTP "123456" against that user — should be 200
+# Try a wrong OTP — should be 400
+# If 200 vs 400 split matches the OTP value, the layer-4 fixed-OTP logic is working.
+```
 
 ## Configurator's stub auth (and how to point it at a real tenant)
 
