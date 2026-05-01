@@ -195,14 +195,15 @@ These all landed in `feat/personal-install`. Listed roughly in the order we hit 
 The hardcoded ansible paths also had a doubled `egov/` segment that resolved to the wrong directory inside `egov/` itself.
 **Fix:** All three now read `CONFIGURATOR_DIR` / `UI_ESBUILD_DIR` from the env (passed by `up.sh seed`), falling back to `playbook_dir/../../../digit-configurator` when unset. The fix in §3.3 only patched ansible-side ANSIBLE_DEPRECATED reference; this is the rest of it.
 
-### 3.26 Citizen OTP login is a four-layer config — fix any one and you still see a 404 / 400
-**Symptom:** `/digit-ui/citizen/login` → enter mobile → "Something went wrong" or hangs at OTP screen rejecting any value.
-**Cause:** OTP on naipepea is *not* in the egov-user code — it's mocked via Kong's `request-termination` plugin **and** validated by an env-var override on egov-user. Personal-install was missing every layer:
+### 3.26 Citizen OTP login is a five-layer config — fix any one and you still see a 404 / 400
+**Symptom:** `/digit-ui/citizen/login` → enter mobile → "Something went wrong" or hangs at OTP screen rejecting any value, OR creates a citizen but then 400s the auto-login retry.
+**Cause:** OTP on naipepea is *not* in the egov-user code — it's mocked via Kong's `request-termination` plugin **and** validated by env-var overrides on egov-user. Auto-register-on-login uses a self-callback that needs an explicit URL override too. Personal-install was missing every layer:
 1. Kong mock route for `/otp/*` and `/user-otp/*` — `local-setup/kong/kong.yml` `otp-validate-mock` / `user-otp-mock` services. Missing → `POST /otp/v1/_send` returns 404 ("no Route matched").
 2. digit-ui nginx proxy regex — `local-setup/nginx/digit-ui.conf` line 27. The `:16080` SPA-front nginx forwards a fixed list of API prefixes to Kong. Adding `otp|user-otp|egov-user-event` is required even with the Kong route in place; otherwise nginx 404s before forwarding.
-3. egov-user `EGOV_OTP_HOST` — needs to be `http://kong:8000` (so internal OTP-validate calls hit the same mock). Default of `http://egov-user:8107` makes egov-user call itself.
+3. egov-user `EGOV_OTP_HOST` — needs to be `http://kong:8000` (so internal OTP-validate calls hit the same mock).
 4. egov-user `CITIZEN_LOGIN_PASSWORD_OTP_FIXED_ENABLED=true` + `CITIZEN_LOGIN_PASSWORD_OTP_FIXED_VALUE=123456`. Without this, `/user/oauth/token` returns 400 because the Kong mock never wrote the OTP record to `eg_token` that real validation would check.
-**Fix:** `local-setup/kong/kong.yml`, `local-setup/nginx/digit-ui.conf`, and `local-setup/docker-compose.yaml` (egov-user env block) all updated. The hardcoded OTP value is **`123456`** — same as naipepea. Documented in `docs/03-login-and-tenants.md` "Citizen OTP login — the four-layer config".
+5. egov-user `EGOV_USER_HOST=http://localhost:8107`. The `/user/citizen/_create` handler (which the SPA hits to auto-register a new citizen on first login) calls its own `/user/oauth/token` after creating the user. Java code defaults to `http://egov-user.egov:8080` (Kubernetes-style hostname) which doesn't resolve on docker-compose → `UnknownHostException`. With this override, the call resolves to localhost.
+**Fix:** `local-setup/kong/kong.yml`, `local-setup/nginx/digit-ui.conf`, and `local-setup/docker-compose.yaml` (egov-user env block) all updated. The hardcoded OTP value is **`123456`** — same as naipepea. Documented in `docs/03-login-and-tenants.md` "Citizen OTP login — the five-layer config". The five layers together unlock the SPA's auto-register-on-login UX where any new mobile + `123456` works on first try.
 
 ### 3.25 egov-localization OOM at default heap once en_IN is seeded
 **Symptom:** `/localization/messages/v1/_search` returns `Handler dispatch failed: java.lang.OutOfMemoryError: Java heap space` after seeding ~3,700 rows at any tenant. Even after a restart, search returns empty (Redis cached the OOM-era empty response).
