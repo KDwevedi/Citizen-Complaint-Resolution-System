@@ -4,10 +4,10 @@ When you see a feature on screen and want to find / fix / extend the source, thi
 
 There are two UI repos:
 
-| Repo | What | Live workflow |
-|---|---|---|
-| `ChakshuGautam/digit-configurator` | Admin SPA — onboarding wizard, MDMS CRUD pages, theme editor, dashboard | Direct push (you have write access). Branch → push → merge. PRs nice-to-have but not gate-kept. |
-| `theflywheel/digit-ui-esbuild` | Citizen + employee SPA — file complaint, inbox, complaint detail, profile | Personal fork (`KDwevedi/digit-ui-esbuild`) → branch → push → PR → merge. CI failures on `docker` job are a known pre-existing infra issue and not blocking. |
+| Repo | What |
+|---|---|
+| `ChakshuGautam/digit-configurator` | Admin SPA — onboarding wizard, MDMS CRUD pages, theme editor, dashboard |
+| `theflywheel/digit-ui-esbuild` | Citizen + employee SPA — file complaint, inbox, complaint detail, profile |
 
 There's also a **legacy** `theflywheel/digit-configurator` with a long-stale `fix/onboarding-payload-shapes` branch — treat as historical, all new configurator work goes to ChakshuGautam.
 
