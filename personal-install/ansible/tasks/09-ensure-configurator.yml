@@ -4,9 +4,9 @@
 # the pre-built dist read-only); this task is the build-side of that
 # contract: if dist/ is empty, build it before the container starts.
 
-- name: "Locate digit-configurator sibling repo"
+- name: "Locate digit-configurator sibling repo (CONFIGURATOR_DIR overrides; default = sibling of personal-install)"
   ansible.builtin.set_fact:
-    configurator_dir: "{{ playbook_dir }}/../../../egov/digit-configurator"
+    configurator_dir: "{{ lookup('env', 'CONFIGURATOR_DIR') | default(playbook_dir + '/../../../digit-configurator', true) }}"
 
 - name: "Confirm digit-configurator exists at {{ configurator_dir }}"
   ansible.builtin.stat:

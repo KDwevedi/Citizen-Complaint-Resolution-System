@@ -11,9 +11,7 @@ if [[ -f "$ROOT/config.env" ]]; then
 fi
 
 PROJECT="${COMPOSE_PROJECT_NAME:-naipepea-personal}"
-COMPOSE_FILES=(-f "$ROOT/stack/docker-compose.local.yaml"
-               -f "$ROOT/stack/docker-compose.naipepea.yaml"
-               -f "$ROOT/stack/docker-compose.extra.yaml")
+COMPOSE_FILES=(-f "$ROOT/stack/docker-compose.yaml")
 
 flag=""
 [[ "${1:-}" == "--volumes" || "${1:-}" == "-v" ]] && flag="-v"

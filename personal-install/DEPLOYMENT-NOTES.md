@@ -181,6 +181,30 @@ These all landed in `feat/personal-install`. Listed roughly in the order we hit 
 **Symptom:** `up.sh` returned 0 even when compose failed; users only noticed when ansible tried to talk to a stack that wasn't up.
 **Fix:** Explicit `|| { echo "..."; return 1; }` on every compose step. `up.sh` now fails loud with a recovery hint pointing at the most likely cause (stale container).
 
+### 3.22b `down.sh` referenced collapsed compose files
+**Symptom:** `./scripts/down.sh` failed because it tried to `-f docker-compose.local.yaml -f docker-compose.naipepea.yaml -f docker-compose.extra.yaml` — files removed in the §3.17 consolidation.
+**Cause:** `down.sh` wasn't updated when the compose layering was collapsed.
+**Fix:** `down.sh` now uses `-f stack/docker-compose.yaml` like `up.sh`.
+
+### 3.23 `up.sh` and ansible tasks ignored `CONFIGURATOR_DIR` / `UI_ESBUILD_DIR`
+**Symptom:** Re-running on a fresh CCRS clone, `up.sh seed` fails at `09-ensure-configurator.yml` with `path does not exist: .../ansible/../../../egov/digit-configurator`. With `CONFIGURATOR_DIR` set in `config.env`, the failure persists.
+**Cause:** Three places had hardcoded paths that didn't honor the config override:
+- `up.sh:80` — `CFG_DIR="$ROOT/../digit-configurator"`
+- `ansible/tasks/08-start-digit-ui-esbuild.yml:20` — `ui_esbuild_dir: "{{ playbook_dir }}/../../../egov/digit-ui-esbuild"`
+- `ansible/tasks/09-ensure-configurator.yml:9` — `configurator_dir: "{{ playbook_dir }}/../../../egov/digit-configurator"`
+The hardcoded ansible paths also had a doubled `egov/` segment that resolved to the wrong directory inside `egov/` itself.
+**Fix:** All three now read `CONFIGURATOR_DIR` / `UI_ESBUILD_DIR` from the env (passed by `up.sh seed`), falling back to `playbook_dir/../../../digit-configurator` when unset. The fix in §3.3 only patched ansible-side ANSIBLE_DEPRECATED reference; this is the rest of it.
+
+### 3.24 First `up.sh` exits non-zero under Rosetta even though most services come up
+**Symptom:** `up.sh all` brings up 24+ containers, kong reaches healthy, but exits 1 with `dependency failed to start: container egov-localization is unhealthy`. The seed playbook never ran.
+**Cause:** `egov-localization`'s JVM cold-start under Rosetta exceeds compose's healthcheck-flap-tolerance window. Compose marks the container unhealthy mid-startup; downstream services that depend on it (kong, configurator) fail to launch in this pass.
+**Fix (operational):** `egov-localization` finishes warming up within ~30s after the failure. Running:
+1. `docker start digit-ui` (kong DNS race fix per §3.12)
+2. `./scripts/up.sh seed` (only the ansible part; stack is already up)
+3. Manually `docker compose up -d configurator` if Phase 1 didn't bring it (the dep-graph cascade may have skipped it)
+
+…recovers to a fully-up stack. We did not loosen the healthcheck timeouts (would mask actual unhealthiness). See §4.4 for a long-term tunable.
+
 ### 3.22 kong-gateway container not created at all
 **Symptom:** `docker inspect kong-gateway` fails after `up.sh`.
 **Cause:** Compose silently skipped kong because of an earlier service's failure (cascading dep). Without an explicit check, `up.sh`'s `wait for healthy` loop ran for 5 min on a container that didn't exist.

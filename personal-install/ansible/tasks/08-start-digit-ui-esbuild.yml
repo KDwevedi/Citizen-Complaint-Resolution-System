@@ -15,9 +15,9 @@
 #
 # Idempotent: skips install/build if cache is hot. Re-running noops if pid is alive.
 
-- name: "Locate digit-ui-esbuild sibling repo"
+- name: "Locate digit-ui-esbuild sibling repo (UI_ESBUILD_DIR overrides; default = sibling of personal-install)"
   ansible.builtin.set_fact:
-    ui_esbuild_dir: "{{ playbook_dir }}/../../../egov/digit-ui-esbuild"
+    ui_esbuild_dir: "{{ lookup('env', 'UI_ESBUILD_DIR') | default(playbook_dir + '/../../../digit-ui-esbuild', true) }}"
 
 - name: "Confirm digit-ui-esbuild exists at {{ ui_esbuild_dir }}"
   ansible.builtin.stat:

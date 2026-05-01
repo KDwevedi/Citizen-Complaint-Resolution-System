@@ -77,7 +77,8 @@ esac
 ANSIBLE_BIN="$(command -v ansible-playbook 2>/dev/null || echo "$HOME/.local/bin/ansible-playbook")"
 
 # Build the configurator dist if missing; the extra compose file mounts it.
-CFG_DIR="$ROOT/../digit-configurator"
+# CONFIGURATOR_DIR (config.env) overrides; default is sibling of personal-install.
+CFG_DIR="${CONFIGURATOR_DIR:-$ROOT/../digit-configurator}"
 if [[ -d "$CFG_DIR" && ! -f "$CFG_DIR/dist/index.html" ]]; then
   echo "▸ building configurator dist (one-time)…"
   ( cd "$CFG_DIR/packages/data-provider" && npm run build ) >/dev/null

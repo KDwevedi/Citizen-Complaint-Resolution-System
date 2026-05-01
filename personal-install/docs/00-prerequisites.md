@@ -12,6 +12,8 @@ Architecturally, DIGIT is a microservices platform. ~25–30 services run side b
 
 For this project, the only DIGIT module you need to deeply care about is **PGR** (Public Grievance Redressal): citizens file complaints, employees route + resolve, dashboards show SLA performance.
 
+The configurator is itself a DIGIT-aware SPA — it boots with a stub auth state (no login screen) and lets you walk a 4-phase XLSX-driven onboarding wizard or browse Management CRUD pages over the same data. See `01-onboarding-flow.md` for what's behind that UI.
+
 ## The big idea — composable platform
 
 Three things power "same code, different deployment":

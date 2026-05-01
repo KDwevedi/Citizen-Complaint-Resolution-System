@@ -33,6 +33,40 @@ user.roles ∩ MDMS_role_definitions ∩ MDMS_role_action_mappings
 
 If the user's `roles[].tenantId` points to a tenant that doesn't have that role's MDMS record, you get `INVALID_ROLE`. This is the #1 cause of "I just created an admin and it can't log in."
 
+## Configurator's stub auth (and how to point it at a real tenant)
+
+The configurator SPA is the first thing most operators see. **It does not show a login screen on first load.** Instead, on boot it auto-populates `localStorage['crs-auth-state']` with a stub user:
+
+```js
+{
+  user: { name: "System Administrator", roles: ["EMPLOYEE", "GRO", "SUPERUSER", "DGRO"], ... },
+  authToken: "<stub>",
+  isAuthenticated: true,
+  mode: "management",
+  tenant: "pg",
+  targetTenant: "pg",
+  currentPhase: 1,
+  completedPhases: []
+}
+```
+
+The SPA threads this stub through API calls. Most endpoints accept it for SUPERUSER-level operations because the bootstrap tenant `pg` has the role-action mappings that grant access. **You don't have to log in to use the configurator** — that's a feature, not a bug, of personal-install's pre-bootstrapped CCRS local-setup.
+
+**`tenant` and `targetTenant`**: the wizard's data-load XHRs (Phase 4 "Available data: Departments X, Designations Y, …") query `targetTenant`. To target your seeded `ke.nairobi` instead of the default `pg`:
+
+```js
+// in the configurator's browser console
+var s = JSON.parse(localStorage.getItem('crs-auth-state'));
+s.targetTenant = 'ke.nairobi';
+s.tenant = 'ke.nairobi';
+localStorage.setItem('crs-auth-state', JSON.stringify(s));
+location.reload();
+```
+
+The header now shows `ke.nairobi` next to "System Administrator" and the wizard reads/writes against that tenant.
+
+**Backend curls still need a real token** from `/user/oauth/token` — see below. The stub is configurator-internal; it's not what the rest of the system uses.
+
 ## Login API
 
 ### Bootstrap operator (CCRS local-setup ADMIN)
