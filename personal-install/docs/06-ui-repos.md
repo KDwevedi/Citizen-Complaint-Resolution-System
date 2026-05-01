@@ -118,7 +118,21 @@ esbuild.build.js             Production build
 
 For naipepea: `ssh naipepea "cd /opt/digit-ui-esbuild && git pull"` — esbuild HMR auto-rebuilds in tmux session named `esbuild`. **No docker rebuild needed.** Hard refresh the browser.
 
-For personal-install: ansible's `08-start-digit-ui-esbuild.yml` spawns `node esbuild.dev.js` on host port `:16080`. Edit source → save → HMR rebuilds in <1s; refresh browser.
+For personal-install — two modes, toggled by `USE_ESBUILD_HMR` in `config.env`:
+
+- **`USE_ESBUILD_HMR=false`** (default): docker `digit-ui` container serves a pre-built bundle baked into the registry image. No node/npm setup needed. To pick up new commits to `digit-ui-esbuild` you'd need a new image build/pull from the registry — outside personal-install's control.
+- **`USE_ESBUILD_HMR=true`**: host-side `node esbuild.dev.js` runs from `UI_ESBUILD_DIR` (typically `~/repositories/egov/digit-ui-esbuild`). Edit source → save → HMR rebuilds (~50ms) → browser auto-refreshes. Best for actively editing UI source.
+
+Switch direction:
+```bash
+# from docker → HMR
+USE_ESBUILD_HMR=true ./scripts/up.sh seed --tags esbuild
+
+# from HMR → docker
+USE_ESBUILD_HMR=false ./scripts/up.sh seed --tags esbuild
+```
+
+Both directions are idempotent — ansible stops the inactive mode and starts the active one. Re-running with the same flag reports `changed=0`.
 
 ### Key conventions
 

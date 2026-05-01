@@ -124,13 +124,61 @@
       tags: [configurator, ui]
       when: ensure_configurator | default(true) | bool
 
-    - name: "Spawn digit-ui-esbuild (host-side HMR)"
+    # digit-ui serving mode — toggled by USE_ESBUILD_HMR in config.env.
+    #
+    # HMR=true:  stop docker digit-ui (releases port {{ port_prefix }}080),
+    #            spawn host-side esbuild.dev.js. Live reloads on file save.
+    # HMR=false: stop any host esbuild process (releases the port for docker),
+    #            ensure docker digit-ui is up. Pre-built bundle from registry.
+    #
+    # Both modes are idempotent: re-running with the same flag is a no-op once
+    # the right thing is running. Switching flags also works — the inverse-mode
+    # cleanup runs first.
+    - name: "digit-ui mode: HMR — stop docker digit-ui (so esbuild can claim :{{ port_prefix }}080)"
+      ansible.builtin.shell: |
+        if docker ps --filter name=^digit-ui$ --format '{% raw %}{{.Names}}{% endraw %}' | grep -q '^digit-ui$'; then
+          docker stop digit-ui
+        fi
+      args: { executable: /bin/bash }
+      register: stop_digit_ui_for_hmr
+      changed_when: stop_digit_ui_for_hmr.stdout | length > 0
+      when: use_esbuild_hmr | bool
+      tags: [esbuild, ui, always]
+
+    - name: "digit-ui mode: HMR — spawn host esbuild.dev.js"
       ansible.builtin.include_tasks:
         file: tasks/08-start-digit-ui-esbuild.yml
         apply:
           tags: [esbuild, ui]
       tags: [esbuild, ui]
-      when: start_esbuild | default(true) | bool
+      when: use_esbuild_hmr | bool
+
+    - name: "digit-ui mode: docker — stop host esbuild if running (releases :{{ port_prefix }}080)"
+      ansible.builtin.shell: |
+        pids=$(pgrep -f 'esbuild.dev.js' 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+          kill $pids 2>/dev/null || true
+          echo "killed esbuild pid(s): $pids"
+        fi
+      args: { executable: /bin/bash }
+      register: stop_esbuild_for_docker
+      changed_when: "'killed esbuild' in (stop_esbuild_for_docker.stdout | default(''))"
+      when: not (use_esbuild_hmr | bool)
+      tags: [esbuild, ui, always]
+
+    - name: "digit-ui mode: docker — ensure container is up on :{{ port_prefix }}080"
+      ansible.builtin.shell: |
+        state=$(docker inspect --format '{% raw %}{{.State.Status}}{% endraw %}' digit-ui 2>/dev/null || echo absent)
+        case "$state" in
+          running) ;;
+          exited|created|paused) docker start digit-ui >/dev/null && echo started ;;
+          absent)  echo 'digit-ui container missing — run scripts/up.sh stack first' >&2; exit 1 ;;
+        esac
+      args: { executable: /bin/bash }
+      register: start_digit_ui_for_docker
+      changed_when: "'started' in (start_digit_ui_for_docker.stdout | default(''))"
+      when: not (use_esbuild_hmr | bool)
+      tags: [esbuild, ui, always]
 
     # ---- everything below is intentionally NOT in the default seed flow ----
     # The configurator's onboarding wizard at /configurator/ does these steps
@@ -170,7 +218,7 @@
       ansible.builtin.debug:
         msg:
           - "━━━ Personal install ready (Nairobi-flavored) ━━━"
-          - "  digit-ui (esbuild HMR, host) → http://localhost:{{ port_prefix }}080/digit-ui/"
+          - "  digit-ui ({{ 'esbuild HMR, host' if use_esbuild_hmr | bool else 'docker container' }}) → http://localhost:{{ port_prefix }}080/digit-ui/"
           - "  configurator (admin SPA)     → http://localhost:{{ port_prefix }}172/configurator/"
           - "  Kong API gateway             → http://localhost:{{ port_prefix }}000/"
           - "  Gatus health board           → http://localhost:{{ port_prefix }}889/"
@@ -185,7 +233,7 @@
       ansible.builtin.debug:
         msg:
           - "━━━ Personal install ready (plain — no demo data) ━━━"
-          - "  digit-ui (esbuild HMR, host) → http://localhost:{{ port_prefix }}080/digit-ui/"
+          - "  digit-ui ({{ 'esbuild HMR, host' if use_esbuild_hmr | bool else 'docker container' }}) → http://localhost:{{ port_prefix }}080/digit-ui/"
           - "  configurator (admin SPA)     → http://localhost:{{ port_prefix }}172/configurator/"
           - "  Kong API gateway             → http://localhost:{{ port_prefix }}000/"
           - "  Gatus health board           → http://localhost:{{ port_prefix }}889/"

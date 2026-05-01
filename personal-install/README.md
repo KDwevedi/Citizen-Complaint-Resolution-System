@@ -2,6 +2,8 @@
 
 A self-contained workspace that brings up a full DIGIT stack on your laptop, mirrors what naipepea actually runs (same images, same auth pattern), seeds tenants + boundaries, and hands you off to the configurator's onboarding wizard for everything else. Goal: from a fresh `git clone` to a working citizen-complaint flow in ~10 minutes (mostly waiting for image pulls + JVM startup under Rosetta).
 
+> **digit-ui at `:{PORT_PREFIX}080`** runs from the docker `digit-ui` container by default (pre-built bundle, no node setup needed). Set `USE_ESBUILD_HMR=true` in `config.env` to swap to host-side `esbuild.dev.js` HMR for development. Switching is idempotent — ansible stops the inactive mode and starts the active one. Both serve the same SPA code; only the dev loop differs.
+
 ## Layout
 
 ```

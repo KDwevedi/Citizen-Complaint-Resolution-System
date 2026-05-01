@@ -17,6 +17,10 @@ all:
     # creation through the configurator's onboarding wizard.
     seed_demo_data: "{{ lookup('env', 'SEED_DEMO_DATA') | default('true', true) | bool }}"
 
+    # digit-ui serving mode. false = docker `digit-ui` container (default).
+    # true = host-side esbuild HMR. See config.env for details.
+    use_esbuild_hmr: "{{ lookup('env', 'USE_ESBUILD_HMR') | default('false', true) | bool }}"
+
     # Tenant taxonomy for a personal install. Driven by config.env or override
     # at the CLI:  -e personal_tenant_root=in -e personal_tenant_city=in.mumbai
     # Ignored when seed_demo_data is false.
