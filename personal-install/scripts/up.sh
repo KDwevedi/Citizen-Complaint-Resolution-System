@@ -135,9 +135,35 @@ seed() {
     "$ANSIBLE_BIN" -i inventory.yml playbook.yml "$@"
 }
 
+apply_config() {
+  # Re-apply changes that don't auto-propagate after a `git pull`:
+  #   - compose YAML changes → up -d picks up env/heap changes (auto-recreates affected services)
+  #   - kong.yml routes      → kong reload (no container restart needed)
+  #   - bind-mounted nginx/globalConfigs.js → docker restart digit-ui
+  #     (nginx reads the bind-mount file at startup; live edits don't refresh)
+  #   - any service stuck in Created (skipped during initial dependency cascade)
+  echo "▸ docker compose up -d (auto-recreates services with changed env/heap)…"
+  COMPOSE_PROJECT_NAME="$PROJECT" docker compose "${COMPOSE_FILES[@]}" up -d \
+    || { echo "  ✗ compose up failed"; return 1; }
+
+  echo "▸ kong reload (picks up new kong.yml routes/plugins)…"
+  docker exec kong-gateway kong reload >/dev/null 2>&1 \
+    && echo "  kong reloaded" \
+    || echo "  ✗ kong reload failed (container may not be running yet)"
+
+  echo "▸ docker restart digit-ui (re-bind nginx conf + globalConfigs.js)…"
+  docker restart digit-ui >/dev/null 2>&1 \
+    && echo "  digit-ui restarted" \
+    || echo "  ✗ digit-ui restart failed"
+
+  echo "▸ ./scripts/up.sh seed (idempotent — handles localization seed + cache flushes)…"
+  seed
+}
+
 case "$mode" in
   stack) up_stack ;;
   seed)  seed "${@:2}" ;;
   all)   up_stack && seed ;;
-  *) echo "usage: $0 [stack|seed|all] [extra ansible args]" >&2; exit 2 ;;
+  apply) apply_config ;;
+  *) echo "usage: $0 [stack|seed|all|apply] [extra ansible args]" >&2; exit 2 ;;
 esac

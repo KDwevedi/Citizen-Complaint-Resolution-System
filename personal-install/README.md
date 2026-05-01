@@ -1,5 +1,8 @@
 # personal-install — DIGIT/PGR you can stand up in a fresh dir
 
+> **After a `git pull`** that brings in compose / kong.yml / nginx-conf changes, run `./scripts/up.sh apply` from `personal-install/`. That single command auto-recreates services with changed env vars, reloads Kong's declarative config, restarts digit-ui to re-bind its nginx + globalConfigs.js bind mounts, and re-runs the idempotent seed playbook. Skipping any of these and the dev sees a stale-config 4xx/5xx (`docker compose up -d` only catches YAML changes; not bind-mount file edits or Kong's declarative reload).
+
+
 A self-contained workspace that brings up a full DIGIT stack on your laptop, mirrors what naipepea actually runs (same images, same auth pattern), seeds tenants + boundaries, and hands you off to the configurator's onboarding wizard for everything else. Goal: from a fresh `git clone` to a working citizen-complaint flow in ~10 minutes (mostly waiting for image pulls + JVM startup under Rosetta).
 
 > **digit-ui at `:{PORT_PREFIX}080`** runs from the docker `digit-ui` container by default (pre-built bundle, no node setup needed). Set `USE_ESBUILD_HMR=true` in `config.env` to swap to host-side `esbuild.dev.js` HMR for development. Switching is idempotent — ansible stops the inactive mode and starts the active one. Both serve the same SPA code; only the dev loop differs.
