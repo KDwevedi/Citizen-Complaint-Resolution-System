@@ -49,6 +49,37 @@
   changed_when: "'INSERT 0 0' not in (mdms_load.stdout | default(''))"
   when: mdms_fixture_stat.stat.exists
 
+# pg_dump generates random uniqueidentifiers each run, so the per-row
+# unique constraint (tenantid, schemacode, uniqueidentifier) doesn't catch
+# logical duplicates: same (tenantid, schemacode, data->>'id') content,
+# different uniqueidentifier UUID, gets inserted as a new row.
+#
+# This bites visibly on the citizen all-services page: each tile (File a
+# Complaint, My Complaints) is sourced from a row in
+# ACCESSCONTROL-ACTIONS-TEST.actions-test keyed on data->>'id'. With the
+# fixture inserted once on top of CCRS local-setup's bootstrap, every tile
+# renders twice.
+#
+# Dedupe AFTER the INSERT: keep min(ctid) per logical key. Idempotent —
+# re-runs find no dupes and report 0 rows deleted.
+- name: "Dedupe by (tenantid, schemacode, data->>'id') — fixture re-introduces dupes via random uniqueidentifiers"
+  ansible.builtin.shell: |
+    docker exec -i docker-postgres psql -U egov -d egov -tA -v ON_ERROR_STOP=1 <<SQL
+    DELETE FROM eg_mdms_data a
+    USING eg_mdms_data b
+    WHERE a.ctid > b.ctid
+      AND a.tenantid = b.tenantid
+      AND a.schemacode = b.schemacode
+      AND (a.data->>'id') IS NOT NULL
+      AND (b.data->>'id') IS NOT NULL
+      AND (a.data->>'id') = (b.data->>'id');
+    SQL
+  args:
+    executable: /bin/bash
+  register: mdms_dedupe
+  changed_when: "'DELETE 0' not in (mdms_dedupe.stdout | default(''))"
+  when: mdms_fixture_stat.stat.exists
+
 - name: "Confirm row counts per tenant"
   ansible.builtin.shell: |
     docker exec docker-postgres psql -U egov -d egov -tA -c "
