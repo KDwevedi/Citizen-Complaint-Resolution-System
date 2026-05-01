@@ -114,6 +114,14 @@
       tags: [localization, seed]
       when: seed_demo_data | bool
 
+    - name: "Mirror boundaries to SPA's stateTenantId (ke.nairobi → pg) so citizen complaint flow resolves"
+      ansible.builtin.include_tasks:
+        file: tasks/12-mirror-boundaries-to-spa-tenant.yml
+        apply:
+          tags: [boundaries, seed]
+      tags: [boundaries, seed]
+      when: seed_demo_data | bool
+
     - name: "Ensure digit-configurator built + reachable"
       ansible.builtin.include_tasks:
         file: tasks/09-ensure-configurator.yml

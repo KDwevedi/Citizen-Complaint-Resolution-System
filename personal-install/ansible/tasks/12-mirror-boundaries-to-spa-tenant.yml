@@ -1,0 +1,95 @@
+---
+# Mirror boundaries from PERSONAL_TENANT_CITY (e.g. ke.nairobi) to the
+# SPA's stateTenantId (e.g. pg).
+#
+# Why this exists:
+#   The citizen UI loads boundaries from `stateTenantId` baked into
+#   globalConfigs.js (defaults to "pg" upstream). Our ansible 03-seed-boundaries
+#   only seeds them at PERSONAL_TENANT_CITY (ke.nairobi). So /citizen/complaint
+#   pages call /boundary-service/boundary-relationships/_search?tenantId=pg
+#   and get HIERARCHY_DEFINITION_DOES_NOT_EXIST_ERR → 400.
+#
+#   Mirroring to pg keeps stateTenantId on the upstream default (which avoids
+#   the localization-OOM-on-empty-locale class of failures we already documented)
+#   and gives the SPA the boundaries it expects.
+#
+# Source = ke.nairobi (whatever PERSONAL_TENANT_CITY is); destination = pg
+# (whatever the SPA's stateTenantId is). Override via env vars below.
+#
+# Idempotent via INSERT … ON CONFLICT DO NOTHING. Re-runs report 0 rows
+# inserted. Skipped when seed_demo_data=false.
+
+- name: "Set boundary source/dest tenants"
+  ansible.builtin.set_fact:
+    bnd_source_tenant: "{{ lookup('env', 'BOUNDARY_SOURCE_TENANT') | default(personal_tenant_city, true) }}"
+    bnd_dest_tenant: "{{ lookup('env', 'BOUNDARY_DEST_TENANT') | default(bootstrap_tenant, true) }}"
+
+- name: "Mirror boundary entities {{ bnd_source_tenant }} → {{ bnd_dest_tenant }}"
+  ansible.builtin.shell: |
+    docker exec -i docker-postgres psql -U egov -d egov -tA -v ON_ERROR_STOP=1 <<SQL
+    INSERT INTO boundary (id, tenantid, code, geometry, additionaldetails, createdtime, lastmodifiedtime, createdby, lastmodifiedby)
+    SELECT gen_random_uuid()::text, '{{ bnd_dest_tenant }}', code, geometry, additionaldetails, createdtime, lastmodifiedtime, createdby, lastmodifiedby
+      FROM boundary
+     WHERE tenantid = '{{ bnd_source_tenant }}'
+    ON CONFLICT DO NOTHING;
+    SQL
+  args:
+    executable: /bin/bash
+  register: mirror_boundary
+  changed_when: "'INSERT 0 0' not in (mirror_boundary.stdout | default(''))"
+
+- name: "Mirror boundary_hierarchy"
+  ansible.builtin.shell: |
+    docker exec -i docker-postgres psql -U egov -d egov -tA -v ON_ERROR_STOP=1 <<SQL
+    INSERT INTO boundary_hierarchy (id, tenantid, hierarchytype, boundaryhierarchy, createdtime, createdby, lastmodifiedtime, lastmodifiedby)
+    SELECT gen_random_uuid()::text, '{{ bnd_dest_tenant }}', hierarchytype, boundaryhierarchy, createdtime, createdby, lastmodifiedtime, lastmodifiedby
+      FROM boundary_hierarchy
+     WHERE tenantid = '{{ bnd_source_tenant }}'
+       AND NOT EXISTS (
+         SELECT 1 FROM boundary_hierarchy bh
+          WHERE bh.tenantid = '{{ bnd_dest_tenant }}'
+            AND bh.hierarchytype = boundary_hierarchy.hierarchytype
+       );
+    SQL
+  args:
+    executable: /bin/bash
+  register: mirror_hierarchy
+  changed_when: "'INSERT 0 0' not in (mirror_hierarchy.stdout | default(''))"
+
+- name: "Mirror boundary_relationship"
+  ansible.builtin.shell: |
+    docker exec -i docker-postgres psql -U egov -d egov -tA -v ON_ERROR_STOP=1 <<SQL
+    INSERT INTO boundary_relationship (id, tenantid, code, hierarchytype, boundarytype, parent, ancestralmaterializedpath, createdtime, createdby, lastmodifiedtime, lastmodifiedby)
+    SELECT gen_random_uuid()::text, '{{ bnd_dest_tenant }}', code, hierarchytype, boundarytype, parent, ancestralmaterializedpath, createdtime, createdby, lastmodifiedtime, lastmodifiedby
+      FROM boundary_relationship
+     WHERE tenantid = '{{ bnd_source_tenant }}'
+       AND NOT EXISTS (
+         SELECT 1 FROM boundary_relationship br
+          WHERE br.tenantid = '{{ bnd_dest_tenant }}'
+            AND br.hierarchytype = boundary_relationship.hierarchytype
+            AND br.code = boundary_relationship.code
+       );
+    SQL
+  args:
+    executable: /bin/bash
+  register: mirror_rel
+  changed_when: "'INSERT 0 0' not in (mirror_rel.stdout | default(''))"
+
+- name: "Confirm row counts at dest"
+  ansible.builtin.shell: |
+    docker exec docker-postgres psql -U egov -d egov -tA -c "
+      SELECT 'boundary: ' || count(*) FROM boundary WHERE tenantid='{{ bnd_dest_tenant }}'
+      UNION ALL SELECT 'hierarchy: ' || count(*) FROM boundary_hierarchy WHERE tenantid='{{ bnd_dest_tenant }}'
+      UNION ALL SELECT 'relationships: ' || count(*) FROM boundary_relationship WHERE tenantid='{{ bnd_dest_tenant }}';
+    "
+  args:
+    executable: /bin/bash
+  register: dest_counts
+  changed_when: false
+
+- name: "Done"
+  ansible.builtin.debug:
+    msg: |
+      ✓ Mirrored boundaries {{ bnd_source_tenant }} → {{ bnd_dest_tenant }} for SPA stateTenantId:
+      {% for line in dest_counts.stdout_lines %}    {{ line }}
+      {% endfor %}
