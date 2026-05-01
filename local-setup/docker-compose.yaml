@@ -324,6 +324,11 @@ services:
       # without an SMS gateway + populated eg_token, so leave true).
       CITIZEN_LOGIN_PASSWORD_OTP_FIXED_ENABLED: "true"
       CITIZEN_LOGIN_PASSWORD_OTP_FIXED_VALUE: "123456"
+      # egov-user uses this URL to call its own /user/oauth/token from inside
+      # the auto-register-on-login flow. Without an override the Java code
+      # defaults to http://egov-user.egov:8080 (a Kubernetes-style hostname
+      # that does not resolve on docker-compose). naipepea sets this to localhost.
+      EGOV_USER_HOST: http://localhost:8107
       EGOV_ENC_HOST: http://egov-enc-service:1234
       EGOV_IDGEN_HOST: http://egov-idgen:8088
       EGOV_ACCESSCONTROL_HOST: http://egov-accesscontrol:8090
