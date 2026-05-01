@@ -62,17 +62,22 @@
 #
 # Dedupe AFTER the INSERT: keep min(ctid) per logical key. Idempotent —
 # re-runs find no dupes and report 0 rows deleted.
-- name: "Dedupe by (tenantid, schemacode, data->>'id') — fixture re-introduces dupes via random uniqueidentifiers"
+- name: "Dedupe by (tenantid, schemacode, COALESCE(id, code, name, serviceCode)) — fixture re-introduces dupes via random uniqueidentifiers"
   ansible.builtin.shell: |
     docker exec -i docker-postgres psql -U egov -d egov -tA -v ON_ERROR_STOP=1 <<SQL
+    -- Different schemas key on different fields. ACCESSCONTROL-ACTIONS-TEST
+    -- has data->>'id' (numeric); tenant.tenants has data->>'code'; many
+    -- common-masters records have data->>'name'; PGR ServiceDefs use
+    -- data->>'serviceCode'. Use COALESCE so each schema dedupes against
+    -- whichever field it actually populates.
     DELETE FROM eg_mdms_data a
     USING eg_mdms_data b
     WHERE a.ctid > b.ctid
       AND a.tenantid = b.tenantid
       AND a.schemacode = b.schemacode
-      AND (a.data->>'id') IS NOT NULL
-      AND (b.data->>'id') IS NOT NULL
-      AND (a.data->>'id') = (b.data->>'id');
+      AND COALESCE(a.data->>'id', a.data->>'code', a.data->>'name', a.data->>'serviceCode') IS NOT NULL
+      AND COALESCE(a.data->>'id', a.data->>'code', a.data->>'name', a.data->>'serviceCode')
+        = COALESCE(b.data->>'id', b.data->>'code', b.data->>'name', b.data->>'serviceCode');
     SQL
   args:
     executable: /bin/bash
