@@ -195,6 +195,16 @@ These all landed in `feat/personal-install`. Listed roughly in the order we hit 
 The hardcoded ansible paths also had a doubled `egov/` segment that resolved to the wrong directory inside `egov/` itself.
 **Fix:** All three now read `CONFIGURATOR_DIR` / `UI_ESBUILD_DIR` from the env (passed by `up.sh seed`), falling back to `playbook_dir/../../../digit-configurator` when unset. The fix in §3.3 only patched ansible-side ANSIBLE_DEPRECATED reference; this is the rest of it.
 
+### 3.28 globalConfigs.js missing PGR_BOUNDARY + MAP_CENTER + HIERARCHY_TYPE keys
+**Symptom:** Citizen complaint flow at `/citizen/pgr/create-complaint/...` errors `LOWEST_LEVEL_CONFIG_NOT_PRESENT` on the "Complaint's Location" step. Boundary cascade dropdowns (County → SubCounty → Ward) never render.
+**Cause:** `local-setup/nginx/globalConfigs.js` (bind-mounted into the digit-ui container) was missing six keys the citizen complaint flow's PGRBoundaryComponent calls via `globalConfigs.getConfig()`: `HIERARCHY_TYPE`, `BOUNDARY_TYPE`, `PGR_BOUNDARY_HIGHEST_LEVEL`, `PGR_BOUNDARY_LOWEST_LEVEL`, `MAP_CENTER`, `EMPLOYEE_MODULE_DENY_LIST`. Naipepea's `/opt/digit/nginx/globalConfigs.js` defines all of them.
+**Fix:** added the six vars + their getConfig branches in commit `9897f584`. `docker restart digit-ui` to pick up after pull. Personal-install's `mapCenter` defaults to Punjab (matching the upstream `stateTenantId="pg"`); override per tenant.
+
+### 3.27 MDMS fixture loads logical duplicates because `pg_dump` randomises uniqueidentifier
+**Symptom:** Citizen home page shows duplicate tiles ("File a Complaint" × 2, "My Complaints" × 2). Citizen "Choose your location" lists `TENANT_TENANTS_PG_CITYA` twice. HRMS forms show double options for Department/Designation/Degree.
+**Cause:** The fixture in `personal-install/sql/fixtures/naipepea-mdms.sql` is generated via `pg_dump --data-only --column-inserts`, which emits a fresh random `uniqueidentifier` for each row. The `INSERT … ON CONFLICT (tenantid, schemacode, uniqueidentifier) DO NOTHING` clause only catches UUID collisions. Same logical record (same `data->>'id'`/`code`/`name`) from CCRS bootstrap + naipepea fixture gets inserted as two physically-distinct rows.
+**Fix:** ansible task `13-load-naipepea-mdms-fixture.yml` runs a DELETE pass after every fixture load, keyed on `COALESCE(data->>'id', data->>'code', data->>'name', data->>'serviceCode')`. Removes ~470 dupe rows per fresh load. Idempotent — re-runs report `DELETE 0`. (Earlier version of the task only deduped by `data->>'id'` and missed schemas keying on `code`/`name` — broadened in commit `e8128632`.)
+
 ### 3.26 Citizen OTP login is a five-layer config — fix any one and you still see a 404 / 400
 **Symptom:** `/digit-ui/citizen/login` → enter mobile → "Something went wrong" or hangs at OTP screen rejecting any value, OR creates a citizen but then 400s the auto-login retry.
 **Cause:** OTP on naipepea is *not* in the egov-user code — it's mocked via Kong's `request-termination` plugin **and** validated by env-var overrides on egov-user. Auto-register-on-login uses a self-callback that needs an explicit URL override too. Personal-install was missing every layer:

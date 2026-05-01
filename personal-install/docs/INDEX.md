@@ -30,6 +30,11 @@ The `up.sh` brings the stack up; everything *after* that is what these docs cove
 | Citizen UI shows raw keys (`CS_COMMON_HELPLINE`, `LOGIN_WITH_EMAIL`) | `04-localization.md` §"Raw-key leaks" |
 | Theme/logo doesn't apply after wizard Phase 5 | `05-branding-and-logos.md` §"Cache + bundle" |
 | Mobile validation rejects valid Kenya numbers | `02-apis.md` §"Employees" — `ValidationConfigs.mobileNumberValidation` MDMS schema |
+| Citizen `/citizen/login/otp` rejects every value (any 6-digit) with `INVALID_OTP` | `03-login-and-tenants.md` §"Citizen OTP login — the five-layer config" — typically the EGOV_USER_HOST or CITIZEN_LOGIN_PASSWORD_OTP_FIXED env vars are missing on egov-user |
+| Citizen complaint flow `Complaint's Location` page errors `LOWEST_LEVEL_CONFIG_NOT_PRESENT` | `05-branding-and-logos.md` §"globalConfigs.js per-tenant keys" — PGR_BOUNDARY_LOWEST_LEVEL + HIERARCHY_TYPE need to be defined |
+| Wizard's `targetTenant=ke.nairobi` Phase 4 panel shows "Available data: 0" everywhere | `01-onboarding-flow.md` §"How phases are driven" — fixture load missing or didn't run; `up.sh seed --tags mdms-fixture` |
+| Citizen home page shows duplicate tiles ("File a Complaint" × 2) | `01-onboarding-flow.md` §"Phase 3" — MDMS dupe by `data->>'id'`/`code`/`name`; `up.sh seed --tags mdms-fixture` re-runs the dedupe pass |
+| `_search` returns empty / stale even after `_upsert` succeeded | `04-localization.md` §"Server-side cache bust" — `POST /localization/messages/cache-bust` |
 
 ## When to escalate
 

@@ -299,6 +299,13 @@ GET /filestore/v1/files/url?tenantId=ke.nairobi&fileStoreIds=<id>
 
 `/localization/messages/v1/_search` and `/localization/messages/v1/_upsert` — covered in `04-localization.md` because there's enough nuance to fill its own doc (dedup-by-code-in-batch bug, locale-region semantics, cache busting).
 
+One endpoint worth calling out here too:
+
+```
+POST /localization/messages/cache-bust
+```
+Returns `{successful: true}` and invalidates the localization service's per-tenant in-memory cache. Required after any direct INSERT to the `message` table or any `_upsert` whose results need to be visible immediately. The configurator's bulk import calls it automatically. Fallback: `redis-cli DEL messages computedMessages` + `docker restart egov-localization` (heavier — only use if the endpoint is unavailable).
+
 ## Idempotency conventions
 
 | Endpoint | On duplicate |

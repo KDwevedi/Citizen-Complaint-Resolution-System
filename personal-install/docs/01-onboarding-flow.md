@@ -22,6 +22,24 @@ If you want to script the same operations as direct API calls instead of going t
   ```
   After reload the header shows `ke.nairobi` next to "System Administrator" and wizard panes operate against that tenant.
 
+## What ships pre-loaded after `up.sh seed`
+
+CCRS local-setup ships ~1,772 MDMS records (mostly at `pg` and `statea`); the personal-install ansible flow brings the count to ~3,800 by loading a 4,377-row fixture (commit `cf5ba16c` in PR #14) extracted from naipepea via `pg_dump --data-only`. The fixture covers:
+
+- `RAINMAKER-PGR.ServiceDefs` at `ke` and `ke.nairobi` (37 records each — the Nairobi-pilot complaint types)
+- `ACCESSCONTROL-ROLEACTIONS.roleactions` at `ke` and `ke.nairobi` (384 each — role→endpoint maps)
+- `ACCESSCONTROL-ROLES.roles` at `ke` and `ke.nairobi` (22 each)
+- `common-masters.{Department, Designation, IdFormat}` at `ke` and `ke.nairobi`
+- `DataSecurity.{SecurityPolicy, DecryptionABAC, MaskingPatterns, EncryptionPolicy}` at all 4 tenants
+- `Workflow.{AutoEscalation, BusinessServiceMasterConfig, BusinessServiceConfig}`
+- `egov-hrms.{Degree, EmployeeStatus, EmployeeType, EmploymentTest, ...}`
+
+**Why this matters for the wizard**: Phase 4's "Available data from DIGIT" panel reads from `targetTenant`. Without the fixture, `targetTenant=ke.nairobi` shows zeros and the wizard's bulk-import templates can't generate. With it, the panel populates with realistic Nairobi data the wizard expects.
+
+**Deduplication**: the fixture's `INSERT … ON CONFLICT (tenantid, schemacode, uniqueidentifier) DO NOTHING` only catches collisions on the random UUID — same logical record from two sources (CCRS bootstrap + naipepea fixture) gets inserted twice under different UUIDs. Ansible task `13-load-naipepea-mdms-fixture.yml` runs a follow-up DELETE pass keyed on `COALESCE(data->>'id', data->>'code', data->>'name', data->>'serviceCode')` to keep one row per logical key. Re-runs report 0 dupes (idempotent). If you ever load fresh naipepea data on top of an existing stack and see duplicate tiles on the citizen home or duplicate options in the location picker, this is the cause — re-run `up.sh seed --tags mdms-fixture`.
+
+**Boundary mirror**: ansible task `12-mirror-boundaries-to-spa-tenant.yml` SQL-copies the 12 county/sub-county/ward records from `PERSONAL_TENANT_CITY` (default `ke.nairobi`) to `BOOTSTRAP_TENANT` (default `pg`) so the citizen UI's complaint-location cascade resolves. The SPA's `stateTenantId` is `pg`; without the mirror, `boundary-relationships/_search?tenantId=pg` returns 400.
+
 ## Big picture
 
 A "tenant" in DIGIT is a dotted hierarchical string — `ke` is a root, `ke.nairobi` is a city under it. To make `ke.nairobi` usable for PGR you need:

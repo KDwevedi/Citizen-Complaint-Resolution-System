@@ -104,6 +104,22 @@ The docker `digit-ui` container at `:16080` bind-mounts `local-setup/nginx/globa
 
 For naipepea, edit `/opt/digit-ui-esbuild/globalConfigs.js` and `git pull` re-applies if you've committed it.
 
+## globalConfigs.js per-tenant keys (the ones that aren't obvious)
+
+Beyond the auth/footer/region values, the file carries several keys the SPA looks up at runtime via `globalConfigs.getConfig('UPPER_SNAKE_KEY')`. Several broke citizen flows on personal-install before being added (mirroring naipepea):
+
+| getConfig key | var name | Default | What breaks if missing |
+|---|---|---|---|
+| `STATE_LEVEL_TENANT_ID` | `stateTenantId` | `pg` | SPA can't bootstrap; everything 404s |
+| `LOCALE_REGION` | `localeRegion` | `IN` | locale becomes `en_undefined`, all strings raw |
+| `HIERARCHY_TYPE` | `hierarchyType` | `ADMIN` | boundary `_search` calls fall through with no `hierarchyType` param |
+| `BOUNDARY_TYPE` | `boundaryType` | `Ward` | citizen complaint locality dropdown empty |
+| `PGR_BOUNDARY_HIGHEST_LEVEL` / `PGR_BOUNDARY_LOWEST_LEVEL` | `pgrBoundaryHighestLevel` / `pgrBoundaryLowestLevel` | `County` / `Ward` | citizen complaint flow errors `LOWEST_LEVEL_CONFIG_NOT_PRESENT` on the "Complaint's Location" step; cascade dropdowns never render |
+| `MAP_CENTER` | `mapCenter` | `{lat: 30.7333, lng: 76.7794}` (Punjab) on personal-install; naipepea uses `{lat: -1.2921, lng: 36.8219}` (Nairobi) | "Pin Complaint Location" map defaults to `(0,0)` (off-coast Africa) |
+| `EMPLOYEE_MODULE_DENY_LIST` | `employeeModuleDenylist` | `["IM"]` | non-fatal — sidebar shows extra modules that aren't relevant |
+
+These ship in personal-install's `local-setup/nginx/globalConfigs.js` (commit `9897f584`). Override per-tenant by editing the file + `docker restart digit-ui`.
+
 These are read via `globalConfigs.getConfig('DIGIT_FOOTER_BW')` etc. — UPPER_SNAKE keys; arbitrary names won't work.
 
 ## Task: theme drift in citizen UI (the `--color-*` story)

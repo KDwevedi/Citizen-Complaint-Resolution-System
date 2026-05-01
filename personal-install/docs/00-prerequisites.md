@@ -172,6 +172,8 @@ Each step touches multiple services. When something breaks, knowing which servic
 
 | Question | Look at |
 |---|---|
+| "Did the seed actually load?" | postgres: `SELECT tenantid, count(*) FROM eg_mdms_data GROUP BY tenantid` — expect ~1,400 at `pg`, ~1,000 at `ke`/`ke.nairobi` after the fixture |
+| "How do I bust the localization cache?" | `POST /localization/messages/cache-bust` (returns `{successful:true}`); the redis flush + service restart is fallback only |
 | "What complaint types exist?" | MDMS `RAINMAKER-PGR.ServiceDefs` at the city tenant |
 | "What roles can a user have?" | MDMS `ACCESSCONTROL-ROLES.roles` at the city tenant |
 | "What can role X do?" | MDMS `ACCESSCONTROL-ROLEACTIONS.roleactions` |
