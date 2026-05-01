@@ -33,18 +33,25 @@ user.roles ∩ MDMS_role_definitions ∩ MDMS_role_action_mappings
 
 If the user's `roles[].tenantId` points to a tenant that doesn't have that role's MDMS record, you get `INVALID_ROLE`. This is the #1 cause of "I just created an admin and it can't log in."
 
-## Citizen OTP login — the four-layer config
+## Citizen OTP login — the five-layer config
 
-The citizen `/digit-ui/citizen/login` flow on personal-install needs **four** distinct config layers in agreement to produce a working session token. Skip any one of them and you see a different failure mode (404 from nginx, 404 from Kong, OOM, OTP-rejected, etc.). All four mirror naipepea production; the bundle below is shipped on `feat/personal-install`.
+The citizen `/digit-ui/citizen/login` flow on personal-install needs **five** distinct config layers in agreement to produce a working session token (and the SPA's "auto-register on login" fallback to actually create new citizens). Skip any one of them and you see a different failure mode. All five mirror naipepea production; the bundle below is shipped on `feat/personal-install`.
 
 | Layer | File | What it does | What breaks if missing |
 |---|---|---|---|
 | 1. Kong mock for `/otp/*` and `/user-otp/*` | `local-setup/kong/kong.yml` (`otp-validate-mock`, `user-otp-mock` services) | `request-termination` plugin returns hardcoded `{"otp":"","isValidationSuccessful":true}` body. No real OTP service, no SMS gateway. | `POST /otp/v1/_send` → 404 from Kong; SPA falls through to `/citizen/register/name` |
 | 2. digit-ui nginx proxy regex | `local-setup/nginx/digit-ui.conf` | Forwards `/otp`, `/user-otp`, `/egov-user-event` from `:16080` to Kong on `:16000`. | Same 404 — but from this nginx layer, before Kong is reached |
-| 3. `egov-user` OTP host points at Kong | `local-setup/docker-compose.yaml`, env `EGOV_OTP_HOST: http://kong:8000` | Routes egov-user's internal OTP-validate call through Kong, hits the mock from layer 1. Default of `http://egov-user:8107` makes egov-user call itself, infinite loop. | Login OAuth times out / 5xx |
+| 3. `egov-user` OTP host points at Kong | `local-setup/docker-compose.yaml`, env `EGOV_OTP_HOST: http://kong:8000` | Routes egov-user's internal OTP-validate call through Kong, hits the mock from layer 1. | Citizen-create internal validate calls a non-routable URL |
 | 4. Citizen OTP fixed value | `local-setup/docker-compose.yaml`, env on egov-user: `CITIZEN_LOGIN_PASSWORD_OTP_FIXED_ENABLED: "true"` + `CITIZEN_LOGIN_PASSWORD_OTP_FIXED_VALUE: "123456"` | egov-user accepts citizen OTP "123456" directly — bypasses the `eg_token` row check that would normally compare against the OTP `_send` wrote. Our Kong mock doesn't write that row. | `/user/oauth/token` returns 400 "Invalid login credentials" no matter what OTP you type |
+| 5. `egov-user` self-callback host | `local-setup/docker-compose.yaml`, env `EGOV_USER_HOST: http://localhost:8107` | Inside the `/user/citizen/_create` handler, egov-user calls its own `/user/oauth/token` to issue the access token after creating the user. The Java code defaults to `http://egov-user.egov:8080` (a Kubernetes-style hostname that doesn't resolve on docker-compose). | `/user/citizen/_create` (the auto-register endpoint) returns 400 with `UnknownHostException: egov-user.egov` |
 
 **The hardcoded OTP value for personal-install is `123456`.** That's the value to type at the `/digit-ui/citizen/login/otp` screen after entering a mobile number. Same as naipepea (which also uses `123456`).
+
+### Auto-register on login (the new-citizen path)
+
+The SPA's `Login/index.js:332-352` has a try/catch around `authenticateAndSetUser()`: if OAuth fails (typically because the citizen doesn't exist yet), it calls `Digit.UserService.registerUser(...)` (POST `/user/citizen/_create`) and retries auth. With layers 1–5 above all in place, this fallback **transparently creates the citizen** on their first login attempt — they just type their mobile + OTP `123456` and they're in. Their `name` defaults to the mobile number (no registration form needed); they can edit it later via `/digit-ui/citizen/user/profile`.
+
+This matches naipepea's UX: any new mobile + `123456` works on first try, no separate registration step.
 
 To change it: edit `CITIZEN_LOGIN_PASSWORD_OTP_FIXED_VALUE` in `local-setup/docker-compose.yaml` and `docker compose up -d --force-recreate --no-deps egov-user`.
 
@@ -73,12 +80,11 @@ curl -X POST http://localhost:16000/user/oauth/token \
 # that's a separate issue from OTP; the citizen must exist first.
 ```
 
-### When all four are right but you still get 400
+### When all five are right but you still get 400
 
-- **Citizen user doesn't exist yet at the tenant** — egov-user requires the citizen record to exist; OTP login can't *register* them, only authenticate. The SPA at `/citizen/login` doesn't check user existence — it always sends the user to `/otp` after the (mocked-success) OTP send. If the mobile isn't registered, the OAuth call returns 400 "Invalid login credentials". This is identical to naipepea behaviour for non-existent mobiles. The fix is to **register first**:
-  - Use `/digit-ui/citizen/register` (NOT `/login`) → enter mobile + name. SPA hits the registration API which creates the user. Then `/citizen/login` works for that mobile with OTP `123456`.
-  - Or for fastest validation: skip citizens entirely and use `/digit-ui/employee/user/login` with `ADMIN/eGov@123/tenantId=pg`. That bypasses the OTP layer.
 - **Wrong tenant** — citizens registered at `ke.nairobi` won't auth at `tenantId=pg`. Match the tenant on `_send`, `/user/oauth/token`, and the SPA's `Citizen.tenant-id` localStorage entry.
+- **Layer 5 missing on a fresh stack** — symptom is that `/user/oauth/token` directly returns 400 (because the citizen doesn't exist) but auto-register at `/user/citizen/_create` also fails with `UnknownHostException: egov-user.egov`. Confirm `EGOV_USER_HOST=http://localhost:8107` is on the running egov-user container: `docker inspect egov-user | grep EGOV_USER_HOST`.
+- **Mobile validation regex** — egov-user runs the mobile through MDMS `ValidationConfigs.mobileNumberValidation` for the tenant. Default fallback is `(^$|[0-9]{10})` — strict 10-digit, no country code. Fails: `9876543`, `+919876543210`. Works: `9876543210`.
 
 ### How to confirm "the OTP layer is working" without the user-existence variable
 
