@@ -2,6 +2,8 @@
 
 Strings in DIGIT live in postgres (`message` table), keyed by `(code, module, locale, tenantId)`. The localization service exposes search + upsert HTTP endpoints. The UI loads bundles per (locale, module, tenant) and caches them in localStorage. This doc covers the data model, how to fix raw-key leaks, how to translate en → sw, and the platform quirks you'll trip on.
 
+> **Personal-install vs live tenants.** All curl recipes below use `http://localhost:16000` (personal-install Kong). On a live tenant (e.g. `https://naipepea.digit.org`) drop the port. The endpoint paths and payloads are identical.
+
 ## Data model
 
 | Field | Example | Notes |
@@ -48,9 +50,34 @@ Overwrites by `(code, module, locale, tenantId)` keys. No `_delete` — use upse
 
 **Workaround: batch by module.** Send one request per module. Picked up the missing 25 rows in `Nai Pepea/docs/DEV-LOG.md` §12 once we did this. Don't fight it; just plan for it.
 
+What the dedup *doesn't* affect: the same `code` under two different `locale`s in one batch is fine — the dedup is purely on `code` within a request, so per-locale isolation works. (`{code: "X", locale: "en_IN"}` + `{code: "X", locale: "sw_KE"}` in one batch both land.) The pain only kicks in when two same-code rows differ only in `module`.
+
+### Server-side cache bust
+
+The localization service caches per-tenant in memory. After every write, **`_search` keeps returning the pre-write snapshot** until the cache is invalidated. Two ways to bust:
+
+1. **Endpoint (recommended)** — `POST /localization/messages/cache-bust` returns 200 with `{successful: true}`. The configurator's bulk-import calls this automatically after every upsert.
+   ```bash
+   curl -sS -X POST http://localhost:16000/localization/messages/cache-bust \
+     -H "Content-Type: application/json" \
+     -d "{\"RequestInfo\":{\"authToken\":\"$TOKEN\"}}"
+   ```
+2. **Redis + restart (fallback for older builds)** — only if the cache-bust endpoint isn't available:
+   ```bash
+   docker exec digit-redis redis-cli DEL messages computedMessages
+   docker restart egov-localization
+   ```
+   Heavier, evicts everyone's session, takes ~30s for the JVM to come back. Use only as a last resort.
+
 ## Cache busting on the SPA
 
-After an upsert, the live UI won't pick up changes until its localStorage cache invalidates. Force this from devtools:
+There are **three caches** between a write and a user seeing the new string:
+
+1. **Localization service in-memory cache** (server-side) — busted via `POST /localization/messages/cache-bust` (see above).
+2. **digit-ui localStorage** (`Digit.Locale.<locale>.<module>` entries, ~24h TTL) — populated lazily on first SPA render after locale switch. Survives page reloads until TTL expires or you clear it.
+3. **Configurator React Query cache** (`useAvailableLocales`, 10-min `staleTime`) — only relevant for the locale dropdown on `/manage/localization`. After adding a new locale via the StateInfo editor you may need a hard refresh (or wait 10 min) before the new locale appears in the dropdown.
+
+To force a refresh on the digit-ui side from devtools:
 
 ```js
 // in the browser console of an open digit-ui or configurator tab
@@ -59,6 +86,8 @@ location.reload();
 ```
 
 The `Digit.Locale.*` keys store per-(module, locale, tenant) bundles. Newer client code adds `liveStored` / `expiredStored` semantics; older code is stricter — clearing all `Digit.Locale.*` always works.
+
+The active module list per tenant is itself in localStorage at `Digit.Locale.<locale>.List` — if you're scripting an upsert, this is the authoritative list of modules to walk (don't hard-code `rainmaker-common, rainmaker-pgr, rainmaker-hr, rainmaker-workbench` — naipepea also has `digit-ui`, `digit-tenants`, `rainmaker-ke`, `rainmaker-boundary-admin`).
 
 ## Common task: add a new language for a new country (e.g. Portuguese for Mozambique)
 
@@ -85,7 +114,7 @@ Three gotchas to notice:
 - **`label`** is rendered literally — no `t()` wrap. `"Português"` shows as "Português" regardless of the active UI language. That's why the existing dropdown shows `ಕನ್ನಡ` in Kannada script even when the SPA is in English.
 - **`value`** is the exact locale code the SPA passes to `/localization/messages/v1/_search?locale=...`. Case-sensitive — `pt_MZ` ≠ `pt_mz`. Same convention as `message.locale` in postgres.
 
-The configurator now ships a **StateInfo edit page** at `/configurator/manage/state-info/` (or under Tenant Management → State Info — depends on the sidebar layout). Find the active record, edit its `languages` array, add a row:
+The configurator now ships a **StateInfo edit page** at `/configurator/manage/state-info/` (sidebar: **Advanced → State Info**). Click the row, click Edit, edit the `languages` table, add a row:
 
 ```json
 { "label": "Português", "value": "pt_MZ" }
@@ -128,11 +157,11 @@ curl -X POST http://localhost:16000/mdms-v2/v2/_update/common-masters.StateInfo 
 
 ### Step 2: Bulk-load the strings for the new locale
 
-The configurator now has a **localization bulk import** page at `/configurator/manage/localization/` with a Download Template button + an Upload pane. The XLSX template has columns: `code`, `module`, `locale`, `tenantId`, `message`. Fill in your translations, set `locale=pt_MZ` for every row, set `tenantId` to whichever tenant the SPA reads from (`pg` on personal-install; `ke.nairobi` or whatever you've configured in `globalConfigs.js`'s `STATE_LEVEL_TENANT_ID`). Upload.
+The configurator now has a **localization bulk import** page at `/configurator/manage/localization/bulk` with a Download Template button + an Upload pane. The XLSX template has columns: `code`, `module`, `locale`, `message` — **no `tenantId` column**: the tenant comes from the active session, not the file. Fill in your translations, set `locale=pt_MZ` for every row, upload.
 
-The configurator handles the dedup-by-code-in-batch quirk by batching the upload one module at a time, server-side.
+The configurator groups rows by locale and calls `_upsert` once per locale (so the dedup-by-code-in-batch bug only matters across modules, not locales — see above). After all upserts complete it calls the cache-bust endpoint automatically; you only need to hard-refresh the browser to drop the SPA's localStorage cache.
 
-**Export** (handy for translation handoff): the same page has an Export button — pick a source locale (e.g. `en_IN` if you want English-as-source for translation work), and you get an XLSX with all strings for that (locale, tenant). Open in your translation tool, fill the column for the new locale, upload back.
+**Export** (handy for translation handoff): the same screen has an Export button at the top right. It downloads an .xlsx with all messages for the **two locales currently selected in the pivot view's Compare locales dropdowns** — sorted by `(locale, module, code)` so cross-export diffs are clean. Same `code, module, locale, message` shape that bulk-import accepts, so the round-trip (export → edit → re-import) is symmetric.
 
 **Direct API alternative**:
 
@@ -226,6 +255,8 @@ curl -s -X POST http://localhost:16000/mdms-v2/v2/_search \
 ## Common task: fix a raw-key leak
 
 Symptom: UI shows `CS_LOGIN_REGISTER_WITH_EMAIL` literally instead of "Login or register with email".
+
+> **The double-underscore trap.** When a workflow-action MDMS-driven dropdown declares `populators.mdmsConfig.localePrefix: "CS_REJECTION_"` and the master record's value is `OUTSIDE_JURISDICTION`, the form composes the lookup key as `localePrefix + "_" + code` — that is, an explicit underscore is added on top of the prefix's trailing one. So the locale lookup is the **double-underscore** key `CS_REJECTION__OUTSIDE_JURISDICTION`. If you upsert the single-underscore variant nothing renders. Verified live 2026-05-01 fixing CCRS#489 (Reject Complaint reason dropdown). When the screen shows a raw key, copy it character-by-character before assuming you know how it's spelled.
 
 Diagnose:
 1. **Is the key referenced in source?** `grep -rn 'CS_LOGIN_REGISTER_WITH_EMAIL' theflywheel/digit-ui-esbuild/` — confirms it's an actual key the UI looks up.
