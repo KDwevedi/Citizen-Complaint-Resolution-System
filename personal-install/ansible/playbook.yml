@@ -56,38 +56,28 @@
       tags: [always]
 
   tasks:
-    # The docker `digit-ui` container bind-mounts `local-setup/nginx/globalConfigs.js`
-    # at runtime (host file → container's /var/web/digit-ui/globalConfigs.js).
-    # Upstream ships it with `stateTenantId="pg"` / `localeRegion="IN"` — wrong
-    # default for any non-Punjab personal-install. Patch it here so the citizen +
-    # employee SPAs at :{{ port_prefix }}080 default to the seeded tenant root.
-    # Bind mount is live → no container restart needed.
+    # NOTE on digit-ui's globalConfigs.js (the bind-mounted one in stack/nginx/):
     #
-    # Skipped when seed_demo_data=false — operator owns the file in plain mode.
-    - name: "Patch local-setup/nginx/globalConfigs.js for personal-install tenant"
-      ansible.builtin.lineinfile:
-        path: "{{ playbook_dir }}/../stack/nginx/globalConfigs.js"
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
-      loop:
-        - { regexp: '^\s*var stateTenantId = ', line: '  var stateTenantId = "{{ personal_tenant_root }}";' }
-        - { regexp: '^\s*var localeRegion = ', line: '  var localeRegion = "{{ personal_tenant_root | upper }}";' }
-      register: globalconfigs_patch
-      when: seed_demo_data | bool
-      tags: [globalconfigs, ui, always]
-
-    # `lineinfile` does atomic write (temp + rename), invalidating the digit-ui
-    # container's bind-mount inode (same class as DEPLOYMENT-NOTES §3.18). The
-    # restart re-binds; bind-mount is :ro so live edits don't risk corruption,
-    # but the inode swap on rename does. No-op when the file wasn't changed.
-    - name: "Restart digit-ui to re-bind globalConfigs.js after lineinfile rename"
-      ansible.builtin.command: docker restart digit-ui
-      changed_when: true
-      when:
-        - seed_demo_data | bool
-        - globalconfigs_patch is defined
-        - globalconfigs_patch.changed | default(false)
-      tags: [globalconfigs, ui, always]
+    # We do NOT patch stateTenantId or localeRegion away from the upstream `pg/IN`
+    # default. Tried that, found it broke the citizen UI. CCRS local-setup ships
+    # localization rows at `pg/en_IN` (88 entries) and `statea.g/en_IN` (4506
+    # entries). It does NOT ship anything at `ke/en_KE` — and the localization
+    # service does a full-table scan when no rows match, so the SPA hangs ~55s
+    # on every (module, locale) it tries to load before falling back. Multiplied
+    # across the 5 modules digit-ui loads at boot, that's a several-minute hang.
+    #
+    # So: digit-ui at :{{ port_prefix }}080 stays on `pg/en_IN` for the moment.
+    # Citizens hitting it land at the bootstrap pg tenant. To target `ke.nairobi`
+    # for citizen complaints you also need to seed at least pg/en_IN-equivalent
+    # localizations at ke/en_IN (or sw_KE, if you've got Swahili strings) —
+    # naipepea's `translate_rest.py` + `resync-nairobi.py` (see DEV-LOG §12) is
+    # the reference pattern. Until that lands as an ansible task, this is a
+    # manual step. The configurator wizard's targetTenant works fine without
+    # this — it's a citizen-UI concern, not a wizard concern.
+    #
+    # If you do want digit-ui to point at ke, edit stack/nginx/globalConfigs.js
+    # by hand (set stateTenantId="ke", localeRegion="KE") AFTER seeding
+    # localizations, then `docker restart digit-ui`.
 
     # include_tasks (not import_tasks) so when: seed_demo_data=false, the file
     # isn't loaded at all — keeps the plain-mode recap clean. Trade-off:
