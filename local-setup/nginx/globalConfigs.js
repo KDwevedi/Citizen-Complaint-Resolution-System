@@ -14,6 +14,15 @@ var globalConfigs = (function () {
   var mdmsContext = "mdms-v2";
   var hrmsContext = "egov-hrms";
   var invalidEmployeeRoles = ["SYSTEM"];
+  // PGR boundary hierarchy + map config — mirror naipepea so the citizen
+  // complaint flow's "Complaint's Location" page (PGRBoundaryComponent)
+  // doesn't 4xx with LOWEST_LEVEL_CONFIG_NOT_PRESENT.
+  var hierarchyType = "ADMIN";
+  var boundaryType = "Ward";
+  var pgrBoundaryHighestLevel = "County";
+  var pgrBoundaryLowestLevel = "Ward";
+  var mapCenter = { lat: 30.7333, lng: 76.7794 };  // Punjab default; override per-tenant
+  var employeeModuleDenylist = ["IM"];
 
   // Runtime locale fallback for local setup: force default language unless user explicitly changes it.
   try {
@@ -82,6 +91,18 @@ var globalConfigs = (function () {
       return hrmsContext;
     } else if (key === "INVALIDROLES") {
       return invalidEmployeeRoles;
+    } else if (key === "HIERARCHY_TYPE") {
+      return hierarchyType;
+    } else if (key === "BOUNDARY_TYPE") {
+      return boundaryType;
+    } else if (key === "PGR_BOUNDARY_HIGHEST_LEVEL") {
+      return pgrBoundaryHighestLevel;
+    } else if (key === "PGR_BOUNDARY_LOWEST_LEVEL") {
+      return pgrBoundaryLowestLevel;
+    } else if (key === "MAP_CENTER") {
+      return mapCenter;
+    } else if (key === "EMPLOYEE_MODULE_DENY_LIST") {
+      return employeeModuleDenylist;
     }
   };
 
