@@ -8,6 +8,7 @@ The `up.sh` brings the stack up; everything *after* that is what these docs cove
 
 | If you want to … | Read |
 |---|---|
+| Build a mental model of DIGIT before touching anything (start here if new) | [00-prerequisites.md](00-prerequisites.md) |
 | Walk the configurator's onboarding wizard end-to-end and not get stuck | [01-onboarding-flow.md](01-onboarding-flow.md) |
 | Skip the UI — script onboarding via direct API calls (curl) | [02-apis.md](02-apis.md) |
 | Understand login, tenant scopes, why `INVALID_ROLE` happens | [03-login-and-tenants.md](03-login-and-tenants.md) |
