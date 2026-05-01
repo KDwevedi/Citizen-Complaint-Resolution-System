@@ -100,7 +100,7 @@ The docker `digit-ui` container at `:16080` bind-mounts `local-setup/nginx/globa
 
 1. **Editing the host file is enough** — bind mount reflects changes immediately, no rebuild needed.
 2. **Atomic writes (sed -i, lineinfile, vite-style temp+rename) break the bind mount** because they swap the inode the container originally bound. Symptom: nginx returns `404 No such file or directory` for `globalConfigs.js`. Fix: `docker restart digit-ui` re-binds the new inode. Documented in `../DEPLOYMENT-NOTES.md` §3.18.
-3. **Ansible task in `playbook.yml`** patches `stateTenantId` + `localeRegion` based on `PERSONAL_TENANT_ROOT` from `config.env` when `SEED_DEMO_DATA=true`, then restarts digit-ui. Re-running `up.sh seed` resets the file to the personal-install variant. If you've made other edits that you want preserved, edit the file under a different tenant root or set `SEED_DEMO_DATA=false`.
+3. **The file isn't ansible-managed.** We tried patching `stateTenantId` + `localeRegion` from `PERSONAL_TENANT_ROOT` and reverted — the localization service does a full-table scan when a tenant has no rows at the requested locale, so pointing the SPA at an unseeded tenant hangs the boot for several minutes. See `playbook.yml` for the full rationale. To override the file by hand: edit `local-setup/nginx/globalConfigs.js`, `docker restart digit-ui`. The bind-mount picks up the new content; the restart is required because `lineinfile`/`sed -i` swap the inode.
 
 For naipepea, edit `/opt/digit-ui-esbuild/globalConfigs.js` and `git pull` re-applies if you've committed it.
 
