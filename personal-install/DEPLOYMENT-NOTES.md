@@ -195,6 +195,11 @@ These all landed in `feat/personal-install`. Listed roughly in the order we hit 
 The hardcoded ansible paths also had a doubled `egov/` segment that resolved to the wrong directory inside `egov/` itself.
 **Fix:** All three now read `CONFIGURATOR_DIR` / `UI_ESBUILD_DIR` from the env (passed by `up.sh seed`), falling back to `playbook_dir/../../../digit-configurator` when unset. The fix in §3.3 only patched ansible-side ANSIBLE_DEPRECATED reference; this is the rest of it.
 
+### 3.25 egov-localization OOM at default heap once en_IN is seeded
+**Symptom:** `/localization/messages/v1/_search` returns `Handler dispatch failed: java.lang.OutOfMemoryError: Java heap space` after seeding ~3,700 rows at any tenant. Even after a restart, search returns empty (Redis cached the OOM-era empty response).
+**Cause:** `egov-localization` ships with `JAVA_TOOL_OPTIONS=-Xms64m -Xmx256m` (256 MB max heap) by default. The image's entrypoint also reads `JAVA_OPTS` (NOT `JAVA_TOOL_OPTIONS`!) so the env-var route was being silently ignored — `jinfo` showed `MaxHeapSize=64MB` regardless. Naipepea runs with `JAVA_OPTS=-Xms128m -Xmx512m`. Personal-install seeded data hits ~3,700 rows in just `pg/en_IN/rainmaker-common`, plus the existing statea/statea.g rows; serving that response over the wire OOMs the JVM.
+**Fix:** Set BOTH env vars on `egov-localization` to `-Xms128m -Xmx1024m` in `local-setup/docker-compose.yaml`. Confirmed via `jinfo $(jps | grep -v Jps | head -1) | grep MaxHeap` that JVM picks up the new ceiling. Redis cache (keys `messages` and `computedMessages`) needs to be deleted *after* the heap bump or the OOM-era empty-response stays cached. Ansible's `11-seed-localizations.yml` does both automatically on every seed-run that inserts new rows.
+
 ### 3.24 First `up.sh` exits non-zero under Rosetta even though most services come up
 **Symptom:** `up.sh all` brings up 24+ containers, kong reaches healthy, but exits 1 with `dependency failed to start: container egov-localization is unhealthy`. The seed playbook never ran.
 **Cause:** `egov-localization`'s JVM cold-start under Rosetta exceeds compose's healthcheck-flap-tolerance window. Compose marks the container unhealthy mid-startup; downstream services that depend on it (kong, configurator) fail to launch in this pass.

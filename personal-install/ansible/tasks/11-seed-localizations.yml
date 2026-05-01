@@ -99,14 +99,72 @@
   register: dest_count
   changed_when: false
 
-- name: "Bust the SPA's localStorage cache by bumping the localization service module list"
+- name: "Compute whether any module's copy actually changed rows"
+  ansible.builtin.set_fact:
+    copy_inserted_anything: "{{ copy_module.results | default([]) | selectattr('changed', 'equalto', true) | list | length > 0 }}"
+
+# egov-localization caches the entire `messages` and `computedMessages` blobs
+# in Redis (as hashes). After our direct INSERTs the cached responses are
+# stale — and worse, an OOM during a request gets cached as "empty result"
+# until you flush. Two-step bust:
+#
+#   1. DEL messages computedMessages from Redis (busts cache)
+#   2. Restart egov-localization (drops in-memory cache + reloads schema)
+#
+# JVM cold-start under Rosetta is ~2-3 minutes; the API returns 502 from
+# Kong until egov-localization registers with the gateway again. We wait
+# for it to return 200 before continuing so downstream tasks (and the SPA
+# reload) see fresh data.
+- name: "Flush Redis cache for localization (messages + computedMessages hashes)"
+  ansible.builtin.shell: |
+    docker exec digit-redis redis-cli DEL messages computedMessages
+  args:
+    executable: /bin/bash
+  changed_when: true
+  when: copy_inserted_anything | bool
+  tags: [localization, seed]
+
+- name: "Restart egov-localization to bust its in-memory cache"
+  ansible.builtin.command: docker restart egov-localization
+  changed_when: true
+  when: copy_inserted_anything | bool
+  tags: [localization, seed]
+
+- name: "Wait for egov-localization to re-register with kong (returns 200, not 502)"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/localization/messages/v1/_search?locale={{ loc_locale }}&module=rainmaker-common&tenantId={{ loc_dest_tenant }}"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body: { RequestInfo: {} }
+    status_code: [200]
+    timeout: 5
+  register: loc_health
+  retries: 60
+  delay: 5
+  until: loc_health.status == 200
+  when: copy_inserted_anything | bool
+
+- name: "Confirm seeded keys resolve"
+  ansible.builtin.set_fact:
+    sample_label: "{{ (loc_health.json.messages | default([]) | selectattr('code', 'equalto', 'CS_COMMON_CHOOSE_LANGUAGE') | list | first | default({})).message | default('(not seeded)') }}"
+  when: copy_inserted_anything | bool
+
+- name: "Done"
   ansible.builtin.debug:
     msg: |
       ✓ {{ loc_dest_tenant }}/{{ loc_locale }} now has {{ dest_count.stdout | trim }} rows
         (copied from {{ loc_source_tenant }}/{{ loc_locale }} across {{ source_modules.stdout_lines | length }} modules)
+      {% if copy_inserted_anything | bool %}
+      ✓ egov-localization restarted; cache busted; sample lookup
+        CS_COMMON_CHOOSE_LANGUAGE resolves to: "{{ sample_label }}"
 
-      To pick up changes in the running citizen UI:
-        Open DevTools console at http://localhost:{{ port_prefix }}080/digit-ui/
-        Run:
+      For an existing browser session at http://localhost:{{ port_prefix }}080/digit-ui/:
+        DevTools console:
           Object.keys(localStorage).filter(k=>k.startsWith('Digit.Locale.')).forEach(k=>localStorage.removeItem(k))
           location.reload()
+      {% else %}
+      No new rows inserted (already idempotent — re-run safe). Localization
+      service NOT restarted. To force a cache bust:
+        docker restart egov-localization
+      {% endif %}

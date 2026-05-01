@@ -400,7 +400,8 @@ services:
       SPRING_REDIS_PORT: 6379
       SERVER_PORT: 8096
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx1024m
+      JAVA_OPTS: -Xms128m -Xmx1024m
     ports:
     - 16096:8096
     healthcheck:
