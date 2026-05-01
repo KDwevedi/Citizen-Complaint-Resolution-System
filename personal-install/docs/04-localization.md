@@ -68,13 +68,30 @@ The locale code convention is `<lang>_<COUNTRY>` — `pt_MZ` for Mozambique-Port
 
 ### Step 1: Add the language to the picker dropdown — `common-masters.StateInfo.languages`
 
-The citizen `/citizen/select-language` page reads its options from `common-masters.StateInfo.languages` MDMS. The configurator now ships a **StateInfo edit page** at `/configurator/manage/state-info/` (or under Tenant Management → State Info — depends on the sidebar layout). Find the active StateInfo record, edit its `languages` array, add a row:
+The citizen `/citizen/select-language` page reads its options from `common-masters.StateInfo[0].languages` MDMS. The exact SPA code lives in `packages/libraries/src/services/molecules/Store/service.js:71-74`:
+
+```js
+const stateInfo = MdmsRes["common-masters"]?.StateInfo?.[0] || {};
+return {
+  languages: stateInfo.hasLocalisation
+    ? stateInfo.languages
+    : [{ label: "ENGLISH", value: Digit.Utils.getDefaultLanguage() }],
+};
+```
+
+Three gotchas to notice:
+- **`StateInfo[0]`** — first record only. Multiple records present? The SPA silently picks the first. Keep one per tenant.
+- **`hasLocalisation: true`** must be set on the record. With `false` the SPA ignores the `languages` array entirely and shows a single hardcoded "ENGLISH" entry. This is the #1 silent failure when adding a new locale.
+- **`label`** is rendered literally — no `t()` wrap. `"Português"` shows as "Português" regardless of the active UI language. That's why the existing dropdown shows `ಕನ್ನಡ` in Kannada script even when the SPA is in English.
+- **`value`** is the exact locale code the SPA passes to `/localization/messages/v1/_search?locale=...`. Case-sensitive — `pt_MZ` ≠ `pt_mz`. Same convention as `message.locale` in postgres.
+
+The configurator now ships a **StateInfo edit page** at `/configurator/manage/state-info/` (or under Tenant Management → State Info — depends on the sidebar layout). Find the active record, edit its `languages` array, add a row:
 
 ```json
 { "label": "Português", "value": "pt_MZ" }
 ```
 
-Save. Cache-bust the SPA (devtools console: clear `Digit.Locale.*` + reload) and the language picker now shows Português.
+Verify `hasLocalisation: true` on the same record. Save. Cache-bust the SPA (devtools console: clear `Digit.Locale.*` + reload) and the language picker now shows Português.
 
 **Direct API alternative** (in case the configurator UI has a quirk):
 
