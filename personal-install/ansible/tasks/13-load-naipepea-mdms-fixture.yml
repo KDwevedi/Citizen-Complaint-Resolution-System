@@ -1,0 +1,103 @@
+---
+# Load the naipepea MDMS fixture (eg_mdms_data + eg_mdms_schema_definition).
+#
+# Why this exists:
+#   CCRS local-setup's full-dump.sql ships ~1,772 MDMS records, mostly at
+#   `pg` and `statea`. Naipepea has 4,275 — including:
+#     - ACCESSCONTROL-ROLEACTIONS at ke + ke.nairobi (384 each)
+#     - ACCESSCONTROL-ROLES.roles at ke + ke.nairobi (22 each)
+#     - common-masters.{Department,Designation,IdFormat} at ke + ke.nairobi
+#     - RAINMAKER-PGR.ServiceDefs at ke + ke.nairobi (37 each — Nairobi-pilot complaint types)
+#     - DataSecurity.{SecurityPolicy,DecryptionABAC,MaskingPatterns,EncryptionPolicy} at all 4 tenants
+#     - egov-hrms.{Degree,EmployeeStatus,EmployeeType,...}
+#     - Workflow.{AutoEscalation,BusinessServiceMasterConfig,BusinessServiceConfig}
+#   These are what the configurator wizard creates (Phases 2-4) plus extra
+#   tenant-customised records hand-loaded on naipepea. Without them the
+#   wizard's targetTenant=ke.nairobi paths see empty result sets, RAINMAKER-PGR
+#   complaint types are missing at ke.nairobi (citizen complaint dropdown
+#   would be empty if the SPA were pointed at ke.nairobi), etc.
+#
+# What this task does:
+#   1. Cat the fixture SQL file into docker-postgres' psql.
+#   2. The file is `pg_dump --data-only --column-inserts` from naipepea,
+#      post-processed with `INSERT … ON CONFLICT DO NOTHING` so re-runs
+#      don't duplicate or fail.
+#   3. Restart egov-mdms-service + mdms-backend to bust the MDMS service's
+#      internal cache (otherwise newly-loaded records aren't visible to API
+#      callers until the cache TTL expires).
+#
+# Skip if seed_demo_data is false — operator owns MDMS in plain mode.
+# Skip if the fixture file isn't present (e.g. if someone runs ansible from
+# a checkout where the file got cleaned out).
+
+- name: "Stat the MDMS fixture file"
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../sql/fixtures/naipepea-mdms.sql"
+  register: mdms_fixture_stat
+
+- name: "Bail if fixture missing"
+  ansible.builtin.debug:
+    msg: "MDMS fixture not found at {{ playbook_dir }}/../sql/fixtures/naipepea-mdms.sql — skipping"
+  when: not mdms_fixture_stat.stat.exists
+
+- name: "Load fixture into postgres"
+  ansible.builtin.shell: |
+    docker exec -i docker-postgres psql -U egov -d egov -v ON_ERROR_STOP=0 < {{ playbook_dir }}/../sql/fixtures/naipepea-mdms.sql
+  args:
+    executable: /bin/bash
+  register: mdms_load
+  changed_when: "'INSERT 0 0' not in (mdms_load.stdout | default(''))"
+  when: mdms_fixture_stat.stat.exists
+
+- name: "Confirm row counts per tenant"
+  ansible.builtin.shell: |
+    docker exec docker-postgres psql -U egov -d egov -tA -c "
+      SELECT tenantid || ': ' || count(*) FROM eg_mdms_data
+       WHERE tenantid IN ('ke','ke.nairobi','pg','statea','statea.g')
+       GROUP BY tenantid ORDER BY tenantid;
+    "
+  args:
+    executable: /bin/bash
+  register: mdms_counts
+  changed_when: false
+  when: mdms_fixture_stat.stat.exists
+
+- name: "Restart MDMS services to invalidate in-memory cache"
+  ansible.builtin.shell: |
+    docker restart egov-mdms-service mdms-backend
+  args:
+    executable: /bin/bash
+  changed_when: true
+  when:
+    - mdms_fixture_stat.stat.exists
+    - mdms_load is defined
+    - mdms_load.changed | default(false)
+
+- name: "Wait for mdms-backend to return 200 from Kong"
+  ansible.builtin.uri:
+    url: "{{ kong_url }}/mdms-v2/v2/_search"
+    method: POST
+    headers: { Content-Type: "application/json" }
+    body_format: json
+    body:
+      RequestInfo: { authToken: "" }
+      MdmsCriteria: { tenantId: "pg", schemaCode: "tenant.tenants", limit: 1 }
+    status_code: [200]
+    timeout: 5
+  register: mdms_health
+  retries: 60
+  delay: 5
+  until: mdms_health.status == 200
+  when:
+    - mdms_fixture_stat.stat.exists
+    - mdms_load is defined
+    - mdms_load.changed | default(false)
+
+- name: "Done"
+  ansible.builtin.debug:
+    msg: |
+      ✓ MDMS fixture loaded (or already up-to-date).
+      Row counts:
+      {% for line in mdms_counts.stdout_lines | default([]) %}    {{ line }}
+      {% endfor %}
+  when: mdms_fixture_stat.stat.exists
