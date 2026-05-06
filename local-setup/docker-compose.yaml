@@ -563,7 +563,17 @@ services:
       SPRING_FLYWAY_ENABLED: 'false'
       SERVER_PORT: 8083
       OTEL_TRACES_EXPORTER: none
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
+      # Heap + multipart bumps for configurator onboarding uploads.
+      # The base image's Spring multipart cap is 5 MB and the heap was 192 MB,
+      # which (a) rejected logos >5 MB with `MaxUploadSizeExceededException` and
+      # (b) OOM'd on resize to 4 thumbnails. Lifts to 25 MB / 2 GB which clears
+      # realistic logos + banners. Phone-camera 12 MP photos still OOM during
+      # the resample path — that's an upstream egov-filestore limitation, not
+      # a config knob. Tracked separately.
+      JAVA_TOOL_OPTIONS: -Xms256m -Xmx2048m -XX:+ExitOnOutOfMemoryError
+      SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE: 25MB
+      SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE: 25MB
+      SPRING_SERVLET_MULTIPART_FILE_SIZE_THRESHOLD: 1KB
       ISS3ENABLED: 'true'
       MINIO_URL: http://minio:9000
       AWS_KEY: minioadmin
