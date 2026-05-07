@@ -941,7 +941,17 @@ services:
     ports:
     - ${PORT_PREFIX:-16}172:80
     volumes:
-    - ../../digit-configurator/dist:/var/www/configurator:ro
+    # CONFIGURATOR_DIR must be an absolute path exported by scripts/up.sh
+    # (which resolves it from config.env, defaulting to sibling-of-CCRS).
+    # Relative defaults are unsafe here: `personal-install/stack/` is a
+    # symlink to `local-setup/`, and `docker compose` resolves relative
+    # volumes against the *invocation path*, not the symlink target — so
+    # `../../digit-configurator/dist` and `../../../digit-configurator/dist`
+    # land at different places depending on which context invoked compose.
+    # Requiring an absolute env var avoids that ambiguity entirely. If
+    # this fails with "invalid spec", check that scripts/up.sh exported
+    # CONFIGURATOR_DIR. (Refs CCRS#549.)
+    - ${CONFIGURATOR_DIR}/dist:/var/www/configurator:ro
     - ./configurator-nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
     - egov-network

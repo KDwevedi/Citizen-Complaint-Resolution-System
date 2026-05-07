@@ -78,11 +78,23 @@ ANSIBLE_BIN="$(command -v ansible-playbook 2>/dev/null || echo "$HOME/.local/bin
 
 # Build the configurator dist if missing; the extra compose file mounts it.
 # CONFIGURATOR_DIR (config.env) overrides; default is sibling of personal-install.
+# Resolved to an *absolute* path here and exported so the compose file's
+# `${CONFIGURATOR_DIR}/dist:/var/www/configurator:ro` volume is unambiguous —
+# personal-install/stack/ is a symlink to local-setup/, and docker compose
+# resolves relative volumes against the invocation path (not the symlink
+# target), so a relative default lands in the wrong place. (Refs CCRS#549.)
 CFG_DIR="${CONFIGURATOR_DIR:-$ROOT/../digit-configurator}"
-if [[ -d "$CFG_DIR" && ! -f "$CFG_DIR/dist/index.html" ]]; then
+if [[ ! -d "$CFG_DIR" ]]; then
+  echo "  ✗ CONFIGURATOR_DIR='$CFG_DIR' does not exist."
+  echo "    Set CONFIGURATOR_DIR in personal-install/config.env to the absolute path of digit-configurator,"
+  echo "    or place digit-configurator as a sibling of Citizen-Complaint-Resolution-System."
+  exit 1
+fi
+export CONFIGURATOR_DIR="$(cd "$CFG_DIR" && pwd)"
+if [[ ! -f "$CONFIGURATOR_DIR/dist/index.html" ]]; then
   echo "▸ building configurator dist (one-time)…"
-  ( cd "$CFG_DIR/packages/data-provider" && npm run build ) >/dev/null
-  ( cd "$CFG_DIR" && npx vite build --base=/configurator/ ) >/dev/null
+  ( cd "$CONFIGURATOR_DIR/packages/data-provider" && npm run build ) >/dev/null
+  ( cd "$CONFIGURATOR_DIR" && npx vite build --base=/configurator/ ) >/dev/null
 fi
 
 mode="${1:-all}"
