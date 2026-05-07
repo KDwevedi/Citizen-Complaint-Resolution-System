@@ -169,10 +169,26 @@
 
     - name: "digit-ui mode: docker — stop host esbuild if running (releases :{{ port_prefix }}080)"
       ansible.builtin.shell: |
-        pids=$(pgrep -f 'esbuild.dev.js' 2>/dev/null || true)
-        if [ -n "$pids" ]; then
-          kill $pids 2>/dev/null || true
-          echo "killed esbuild pid(s): $pids"
+        # `pgrep -f` against the literal string 'esbuild.dev.js' would
+        # match this task's own parent shell (its argv contains the
+        # pattern), so kill ${pids} would SIGTERM ansible itself
+        # (rc=-15). Filter out our own pid + ancestors before killing.
+        my_pid=$$
+        pids=$(pgrep -f 'esbuild.dev.js' 2>/dev/null \
+                | grep -v "^${my_pid}$" \
+                | grep -v "^${PPID}$" \
+                || true)
+        # Belt-and-braces: only kill node processes (esbuild.dev.js is a
+        # node program — bash/pgrep self-matches won't satisfy this).
+        for p in $pids; do
+          comm=$(ps -p "$p" -o comm= 2>/dev/null || true)
+          if [ "$comm" = "node" ]; then
+            kill "$p" 2>/dev/null || true
+            killed="${killed:+$killed }$p"
+          fi
+        done
+        if [ -n "${killed:-}" ]; then
+          echo "killed esbuild pid(s): $killed"
         fi
       args: { executable: /bin/bash }
       register: stop_esbuild_for_docker

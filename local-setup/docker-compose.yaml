@@ -21,7 +21,7 @@ services:
     - postgres_data:/var/lib/postgresql/data
     - ./db/full-dump.sql:/docker-entrypoint-initdb.d/01-full-dump.sql:ro
     ports:
-    - 15432:5432
+    - ${POSTGRES_HOST_PORT:-15432}:5432
     healthcheck:
       test:
       - CMD-SHELL
@@ -70,7 +70,7 @@ services:
     image: ${REGISTRY_URL}/redis:7.2.4
     container_name: digit-redis
     ports:
-    - 16379:6379
+    - ${PORT_PREFIX:-16}379:6379
     healthcheck:
       test:
       - CMD
@@ -103,8 +103,8 @@ services:
     - --advertise-pandaproxy-addr
     - PLAINTEXT://redpanda:8082
     ports:
-    - 19092:9092
-    - 16082:8082
+    - ${KAFKA_HOST_PORT:-19092}:9092
+    - ${PORT_PREFIX:-16}082:8082
     healthcheck:
       test:
       - CMD
@@ -129,8 +129,8 @@ services:
     volumes:
     - minio_data:/data
     ports:
-    - 19000:9000
-    - 19001:9001
+    - ${MINIO_HOST_PORT:-19000}:9000
+    - ${MINIO_CONSOLE_HOST_PORT:-19001}:9001
     healthcheck:
       test:
       - CMD
@@ -194,7 +194,7 @@ services:
     volumes:
     - ./nginx/mdms-proxy.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
-    - 16094:8094
+    - ${PORT_PREFIX:-16}094:8094
     healthcheck:
       test:
       - CMD-SHELL
@@ -231,7 +231,7 @@ services:
       STATE_LEVEL_TENANT_ID: pg
       JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
     ports:
-    - 11234:1234
+    - ${OTEL_HOST_PORT:-11234}:1234
     healthcheck:
       test:
       - CMD-SHELL
@@ -273,7 +273,7 @@ services:
       MANAGEMENT_HEALTH_DB_ENABLED: 'false'
       JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
     ports:
-    - 16088:8088
+    - ${PORT_PREFIX:-16}088:8088
     healthcheck:
       test:
       - CMD-SHELL
@@ -337,7 +337,7 @@ services:
       OTEL_TRACES_EXPORTER: none
       JAVA_TOOL_OPTIONS: -Xms128m -Xmx384m
     ports:
-    - 16107:8107
+    - ${PORT_PREFIX:-16}107:8107
     healthcheck:
       test:
       - CMD-SHELL
@@ -377,7 +377,7 @@ services:
       OTEL_TRACES_EXPORTER: none
       JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m
     ports:
-    - 16109:8109
+    - ${PORT_PREFIX:-16}109:8109
     healthcheck:
       test:
       - CMD-SHELL
@@ -416,7 +416,7 @@ services:
       JAVA_TOOL_OPTIONS: -Xms64m -Xmx1024m
       JAVA_OPTS: -Xms128m -Xmx1024m
     ports:
-    - 16096:8096
+    - ${PORT_PREFIX:-16}096:8096
     healthcheck:
       test:
       - CMD-SHELL
@@ -461,7 +461,7 @@ services:
       MANAGEMENT_HEALTH_DB_ENABLED: 'false'
       JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
     ports:
-    - 16081:8081
+    - ${PORT_PREFIX:-16}081:8081
     healthcheck:
       test:
       - CMD-SHELL
@@ -496,7 +496,7 @@ services:
       OTEL_TRACES_EXPORTER: none
       JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
     ports:
-    - 16090:8090
+    - ${PORT_PREFIX:-16}090:8090
     healthcheck:
       test:
       - CMD-SHELL
@@ -532,7 +532,7 @@ services:
     volumes:
     - ./configs/persister:/persister-config:ro
     ports:
-    - 16091:8091
+    - ${PORT_PREFIX:-16}091:8091
     healthcheck:
       test:
       - CMD-SHELL
@@ -584,7 +584,7 @@ services:
         format=ascii'',''image/vnd.dxf; format=binary'',''image/vnd.dxb''},csv:{''text/plain''},txt:{''text/plain''},xlsx:{''application/x-tika-ooxml'',''application/x-tika-msoffice'',''application/vnd.ms-excel'',''application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'',''application/zip''},xls:{''application/x-tika-ooxml'',''application/x-tika-msoffice'',''application/vnd.ms-excel'',''multipart/form-data''},zip:{''application/zip'',''application/octet-stream''},geojson:{''application/json'',''text/plain'',''application/geo+json'',''multipart/form-data''},json:{''application/json'',''text/plain''}}'
       EGOV_MDMS_HOST: http://egov-mdms-service:8094
     ports:
-    - 16084:8083
+    - ${PORT_PREFIX:-16}084:8083
     healthcheck:
       test:
       - CMD-SHELL
@@ -632,7 +632,7 @@ services:
       EGOV_STATELEVEL_TENANT: pg
       HRMS_SYSTEM_USERNAME: INTERNAL_USER
     ports:
-    - 16092:8092
+    - ${PORT_PREFIX:-16}092:8092
     healthcheck:
       test:
       - CMD-SHELL
@@ -679,7 +679,7 @@ services:
       STATE_LEVEL_TENANT_ID: pg
       KAFKAJS_NO_PARTITIONER_WARNING: 1
     ports:
-    - 16086:8080
+    - ${PORT_PREFIX:-16}086:8080
     healthcheck:
       test:
       - CMD-SHELL
@@ -709,7 +709,7 @@ services:
       OTEL_INSTRUMENTATION_JDBC_ENABLED: 'false'
       JAVA_TOOL_OPTIONS: -Xms64m -Xmx128m
     ports:
-    - 16085:8080
+    - ${PORT_PREFIX:-16}085:8080
     healthcheck:
       test:
       - CMD-SHELL
@@ -774,7 +774,7 @@ services:
       JAVA_OPTS: -Xmx192m -Xms192m
       OTEL_TRACES_EXPORTER: none
     ports:
-    - 16083:8080
+    - ${PORT_PREFIX:-16}083:8080
     healthcheck:
       test:
       - CMD-SHELL
@@ -790,7 +790,7 @@ services:
     image: ${REGISTRY_URL}/digit-ui:pgr-fixes
     container_name: digit-ui
     ports:
-    - 16080:80
+    - ${PORT_PREFIX:-16}080:80
     volumes:
     - ./nginx/digit-ui.conf:/etc/nginx/conf.d/default.conf:ro
     - ./nginx/globalConfigs.js:/var/web/digit-ui/globalConfigs.js:ro
@@ -822,11 +822,11 @@ services:
     volumes:
     - ./kong/kong.yml:/kong/kong.yml:ro
     ports:
-    - 16000:8000
-    - 16443:8443
-    - 16001:8001
-    - 16002:8002
-    - 16100:8100
+    - ${PORT_PREFIX:-16}000:8000
+    - ${PORT_PREFIX:-16}443:8443
+    - ${PORT_PREFIX:-16}001:8001
+    - ${PORT_PREFIX:-16}002:8002
+    - ${PORT_PREFIX:-16}100:8100
     healthcheck:
       test:
       - CMD
@@ -874,7 +874,7 @@ services:
     volumes:
     - ./gatus/config.yaml:/config/config.yaml:ro
     ports:
-    - 16889:8080
+    - ${PORT_PREFIX:-16}889:8080
     environment:
       GATUS_CONFIG_PATH: /config/config.yaml
     networks:
@@ -901,7 +901,7 @@ services:
 
       '
     ports:
-    - 16888:8888
+    - ${PORT_PREFIX:-16}888:8888
     volumes:
     - ./jupyter/dataloader/templates:/home/jovyan/work/templates
     - ./jupyter:/home/jovyan/work/dataloader
