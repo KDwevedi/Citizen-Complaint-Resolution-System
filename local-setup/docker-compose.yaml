@@ -787,12 +787,21 @@ services:
     networks:
     - egov-network
   digit-ui:
-    image: ${REGISTRY_URL}/digit-ui:pgr-fixes
+    # Plain nginx serving the built SPA from ${UI_ESBUILD_DIR}/build
+    # (produced by `node esbuild.build.js`, run from scripts/up.sh).
+    # Replaces the egovio/digit-ui:pgr-fixes baked-bundle image so
+    # the bundle comes from the operator's local digit-ui-esbuild
+    # checkout, not from whatever was last published. Same model
+    # configurator already uses (vite build → dist/ → mount).
+    image: ${REGISTRY_URL}/nginx:alpine
     container_name: digit-ui
     ports:
     - ${PORT_PREFIX:-16}080:80
     volumes:
+    - ${UI_ESBUILD_DIR}/build:/var/web/digit-ui:ro
     - ./nginx/digit-ui.conf:/etc/nginx/conf.d/default.conf:ro
+    # globalConfigs.js overlay-mounts on top of build/globalConfigs.js
+    # so per-tenant config changes don't require a rebuild.
     - ./nginx/globalConfigs.js:/var/web/digit-ui/globalConfigs.js:ro
     healthcheck:
       test:

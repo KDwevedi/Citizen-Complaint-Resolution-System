@@ -97,6 +97,50 @@ if [[ ! -f "$CONFIGURATOR_DIR/dist/index.html" ]]; then
   ( cd "$CONFIGURATOR_DIR" && npx vite build --base=/configurator/ ) >/dev/null
 fi
 
+# Same pattern as configurator, for digit-ui-esbuild. The digit-ui compose
+# service mounts ${UI_ESBUILD_DIR}/build:/var/web/digit-ui:ro, so we need
+# the build/ output present before `docker compose up` (otherwise the
+# bind-mount target is missing and the digit-ui container won't start).
+# Honors UI_ESBUILD_DIR from config.env; resolves to absolute path so the
+# compose mount works regardless of how compose is invoked.
+UI_DIR="${UI_ESBUILD_DIR:-$ROOT/../digit-ui-esbuild}"
+if [[ ! -d "$UI_DIR" ]]; then
+  echo "  ✗ UI_ESBUILD_DIR='$UI_DIR' does not exist."
+  echo "    Set UI_ESBUILD_DIR in personal-install/config.env to the absolute path of digit-ui-esbuild,"
+  echo "    or place digit-ui-esbuild as a sibling of Citizen-Complaint-Resolution-System."
+  exit 1
+fi
+export UI_ESBUILD_DIR="$(cd "$UI_DIR" && pwd)"
+
+# Build digit-ui bundle if missing or stale. Freshness gate: if any source
+# file under products/, packages/, public/ or package.json is newer than
+# build/index.html, rebuild. Saves ~30-60s on repeat ups when source hasn't
+# changed.
+need_ui_build=0
+if [[ ! -f "$UI_ESBUILD_DIR/build/index.html" ]]; then
+  need_ui_build=1
+elif find "$UI_ESBUILD_DIR/products" "$UI_ESBUILD_DIR/packages" "$UI_ESBUILD_DIR/public" "$UI_ESBUILD_DIR/package.json" \
+       -type f -newer "$UI_ESBUILD_DIR/build/index.html" 2>/dev/null | grep -q .; then
+  need_ui_build=1
+fi
+if (( need_ui_build )); then
+  echo "▸ building digit-ui bundle (esbuild.build.js)…"
+  # --legacy-peer-deps: digit-ui-esbuild's transitive tree has a known
+  # react18 peer-dep conflict (react-drag-drop-files@2.3.10 wants
+  # react@^18.0.0; the resolved react@18.3.1 should satisfy that but
+  # npm@10+ is stricter). The flag matches what the upstream repo's
+  # README documents.
+  if [[ ! -d "$UI_ESBUILD_DIR/node_modules" ]]; then
+    ( cd "$UI_ESBUILD_DIR" && npm install --legacy-peer-deps ) >&2 \
+      || { echo "  ✗ npm install (digit-ui-esbuild) failed"; exit 1; }
+  fi
+  ( cd "$UI_ESBUILD_DIR" && node esbuild.build.js ) >&2 \
+    || { echo "  ✗ esbuild.build.js failed"; exit 1; }
+  echo "  ✓ digit-ui build/ ready: $UI_ESBUILD_DIR/build/"
+else
+  echo "▸ digit-ui build/ is up-to-date — skipping rebuild"
+fi
+
 mode="${1:-all}"
 
 up_stack() {
