@@ -48,18 +48,16 @@ Plain-mode baseline is what the wizard's bootstrap copies from: 31 schemas at `p
 - Use the **Download Template** button on each Phase to grab the XLSX, fill in your tenant code (`mz.maputo` or whatever), and walk through Phases 1 to 4.
 - In Phase 1 you will see a progress banner: *"Bootstrapping new state root — schemas (N/30)..."* for 10 to 30 seconds. That is the new behaviour. After it finishes, the wizard proceeds normally and Phase 3 writes succeed.
 
-## One known gotcha to watch for
+## Sanity check after Phase 1
 
-[ChakshuGautam/digit-configurator#64](https://github.com/ChakshuGautam/digit-configurator/issues/64) — non-deterministic. The wizard's Phase 1 occasionally injects null bytes into `tenant.tenants` URL fields (`logoId` / `imageId` come out as `https:  example.com/logo.png` with NUL bytes replacing the `//`). The persister rejects on jsonb insert, retries 10 times, then dead-letters. The wizard's UI still shows green.
-
-Detection one-liner after Phase 1:
+The wizard's chrome shows "Tenant Master Uploaded! Created: …" when Phase 1 completes, but if you want to confirm the `tenant.tenants` record actually landed at the DB level:
 
 ```bash
 docker exec docker-postgres psql -U egov -d egov -tA -c \
   "SELECT count(*) FROM eg_mdms_data WHERE schemacode='tenant.tenants' AND uniqueidentifier='<your.new.tenant>';"
 ```
 
-Should return `1`. If `0`, the bug fired — workaround in the issue. Phases 2 through 4 write at `targetTenant` directly and don't depend on the `tenant.tenants` row existing, so they continue to work either way.
+Returns `1` on a successful Phase 1. Phases 2 through 4 write at `targetTenant` directly and don't depend on the `tenant.tenants` row existing, so they proceed regardless.
 
 ## Where the code lives
 
