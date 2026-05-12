@@ -1,8 +1,24 @@
 # Onboarding a tenant under a brand-new state
 
-The fixes that let you onboard a brand-new tenant have landed.
+## What used to happen
 
-The onboarding flow now auto-runs a "bootstrap" step in Phase 1 that registers the schemas, master data, and an ADMIN user at the new state — which is what was missing when Phase 3 of `mz.maputo` failed with `SCHEMA_DEFINITION_NOT_FOUND_ERR`.
+When you onboarded a tenant whose parent state had no MDMS schemas registered (e.g. `mz.maputo` on a stack that's only seeded with the baseline `pg`/`statea` tenants), every Phase 3-4 write failed:
+
+| Write | Error |
+|---|---|
+| `mdms-v2/_create/common-masters.Department` | `SCHEMA_DEFINITION_NOT_FOUND_ERR` |
+| `mdms-v2/_create/common-masters.Designation` | `SCHEMA_DEFINITION_NOT_FOUND_ERR` |
+| `mdms-v2/_create/RAINMAKER-PGR.ServiceDefs` | `SCHEMA_DEFINITION_NOT_FOUND_ERR` |
+| `user/users/_createnovalidate` | `INVALID_ROLE: Unable to validate role from MDMS` |
+| `egov-hrms/employees/_create` | `ERR_HRMS_USER_CREATION_FAILED` (chains user create) |
+
+Phase 1's tenant create succeeded (it writes at the session tenant, where the schema exists) so the user-visible "Tenant Master Uploaded!" banner masked the fact that nothing else would land.
+
+## What's fixed
+
+[ChakshuGautam/digit-configurator#62](https://github.com/ChakshuGautam/digit-configurator/pull/62) (merged as `89d15fab` on `main`). Phase 1 now auto-detects whether the parent state has schemas and, if not, runs a bootstrap step in-flight: clones every schema definition from a source state (default `pg`), copies 14 essential master-data records (roles, IdFormat, DataSecurity.*, Department, Designation, ServiceDefs, Workflow, Inbox, HRMS employee meta), provisions an ADMIN user at the new state, and copies the PGR workflow state machine. The wizard then proceeds through Phases 1-4 unchanged.
+
+For tenants under an *existing* state (e.g. `ke.testzone` on a stack with `ke` already seeded), the bootstrap is skipped — the existence check (`stateNeedsBootstrap`) returns `false` and the wizard goes straight to the tenant create.
 
 ## Quick steps to retest from a clean slate
 
@@ -21,6 +37,10 @@ cd <your-CCRS-checkout>/personal-install
 SEED_DEMO_DATA=false ./scripts/up.sh
 ```
 
+`SEED_DEMO_DATA` is read by ansible at playbook time (`inventory.yml:18`), not from inside any container — setting it inline is sufficient. The PLAY RECAP at the end should show `skipped=8 failed=0`; the ke/ke.nairobi tenant + boundary + naipepea-fixture tasks are gated on this flag.
+
+Plain-mode baseline is what the wizard's bootstrap copies from: 31 schemas at `pg`, 22 role records, 13 Department + 29 Designation + 33 ServiceDef records, PGR workflow at the state level, `ADMIN@pg`/`eGov@123` for sign-in.
+
 **4) Onboard your tenant:**
 
 - Open http://localhost:16172/configurator/
@@ -30,11 +50,20 @@ SEED_DEMO_DATA=false ./scripts/up.sh
 
 ## One known gotcha to watch for
 
-[ChakshuGautam/digit-configurator#64](https://github.com/ChakshuGautam/digit-configurator/issues/64) — non-deterministic. Did not fire on my last run, fired on an earlier one. The wizard's Phase 1 occasionally injects null bytes into `tenant.tenants` URL fields, the persister rejects, and the wizard still shows green. Quick DB check after Phase 1:
+[ChakshuGautam/digit-configurator#64](https://github.com/ChakshuGautam/digit-configurator/issues/64) — non-deterministic. The wizard's Phase 1 occasionally injects null bytes into `tenant.tenants` URL fields (`logoId` / `imageId` come out as `https:  example.com/logo.png` with NUL bytes replacing the `//`). The persister rejects on jsonb insert, retries 10 times, then dead-letters. The wizard's UI still shows green.
+
+Detection one-liner after Phase 1:
 
 ```bash
 docker exec docker-postgres psql -U egov -d egov -tA -c \
   "SELECT count(*) FROM eg_mdms_data WHERE schemacode='tenant.tenants' AND uniqueidentifier='<your.new.tenant>';"
 ```
 
-Should return `1`. If `0`, the bug fired — workaround in the issue. Phases 2 through 4 work either way.
+Should return `1`. If `0`, the bug fired — workaround in the issue. Phases 2 through 4 write at `targetTenant` directly and don't depend on the `tenant.tenants` row existing, so they continue to work either way.
+
+## Where the code lives
+
+- **Wizard bootstrap service**: `src/api/services/tenantBootstrap.ts` in `ChakshuGautam/digit-configurator` (on `main` since the PR #62 merge `89d15fab`). Mirrors `DIGIT-MCP/src/tools/mdms-tenant.ts:837`.
+- **Phase 1 integration**: `src/pages/Phase1Page.tsx` — derives `parentState = newTenant.split('.')[0]`, gates the bootstrap call on `stateNeedsBootstrap(parentState)`.
+- **Personal-install pull path**: `config.env`'s `CONFIGURATOR_DIR` points at a sibling `digit-configurator` clone; `up.sh seed --tags configurator` (or `09-ensure-configurator.yml`) builds the dist and bind-mounts it into the configurator container.
+- **MCP equivalent**: `digit mdms tenant-bootstrap --target-tenant <state> --source-tenant pg` does the same five-step orchestration from the CLI / MCP HTTP transport.
