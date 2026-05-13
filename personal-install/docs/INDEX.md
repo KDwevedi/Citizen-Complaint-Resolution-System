@@ -16,6 +16,7 @@ The `up.sh` brings the stack up; everything *after* that is what these docs cove
 | Change colours, swap the logo, get a tenant's brand right | [05-branding-and-logos.md](05-branding-and-logos.md) |
 | Find the source code for a feature you see on screen | [06-ui-repos.md](06-ui-repos.md) |
 | Onboard a tenant under a brand-new state (auto-bootstrap behaviour) | [07-bootstrap-new-state.md](07-bootstrap-new-state.md) |
+| Know which `up.sh` mode / tag to re-run after a change | [08-ansible-cheatsheet.md](08-ansible-cheatsheet.md) |
 
 ## Most common e2e failure points (and where each is documented)
 
