@@ -96,7 +96,10 @@ const publishEvent = async ({ tenantId, mobile, otp, userType }) => {
         mobileNumber: mobile,
       },
     ],
-    workflow: null,
+    // novu-bridge's DispatchPipelineService enforces workflow.toState as
+    // required even for non-stateful events. Stub it so the OTP event
+    // passes validation and reaches the OTP_SEND TemplateBinding.
+    workflow: { fromState: null, toState: 'SENT', action: 'SEND' },
     context: { source: 'citizen-login' },
     data: { otp, userType: userType || 'CITIZEN' },
   };
