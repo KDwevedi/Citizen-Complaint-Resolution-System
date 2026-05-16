@@ -44,16 +44,22 @@ public class TwilioProviderStrategy implements NovuProviderStrategy {
             config.put("credentials", resolvedProvider.getCredentials());
         }
         
-        // Add sender number from resolved provider with WhatsApp prefix for WhatsApp channel
+        // Sender number: the whatsapp: prefix is required for the WhatsApp channel but is
+        // invalid for sms (Twilio rejects the From/To pair, error 21910). Apply/strip the
+        // prefix to match the resolved provider's channel rather than assuming WhatsApp.
         if (StringUtils.hasText(resolvedProvider.getSenderNumber())) {
             String senderNumber = resolvedProvider.getSenderNumber();
-            
-            // For WhatsApp channel, ensure whatsapp: prefix is present
-            if (!senderNumber.startsWith("whatsapp:")) {
+            boolean isWhatsapp = "whatsapp".equalsIgnoreCase(resolvedProvider.getChannel());
+
+            if (isWhatsapp && !senderNumber.startsWith("whatsapp:")) {
                 senderNumber = "whatsapp:" + senderNumber;
                 log.debug("Twilio: Added whatsapp: prefix to sender number: {}", senderNumber);
+            } else if (!isWhatsapp && senderNumber.startsWith("whatsapp:")) {
+                senderNumber = senderNumber.substring("whatsapp:".length());
+                log.debug("Twilio: Stripped whatsapp: prefix for {} channel sender: {}",
+                        resolvedProvider.getChannel(), senderNumber);
             }
-            
+
             config.put("from", senderNumber);
             log.debug("Twilio: Using formatted senderNumber: {}", senderNumber);
         }

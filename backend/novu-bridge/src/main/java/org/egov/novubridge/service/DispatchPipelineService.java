@@ -130,7 +130,7 @@ public class DispatchPipelineService {
                     .build();
         }
 
-        String whatsappPhone = formatWhatsappPhone(context.getRecipientMobile(), event.getTenantId(), requestInfo);
+        String recipientPhone = formatRecipientPhone(context.getRecipientMobile(), event.getTenantId(), context.getChannel(), requestInfo);
 
         log.info("Dispatching notification: eventId={}, eventName={}, tenant={}, complaintNo={}, " +
                  "templateKey={}, subscriberId={}, provider={}, channel={}, senderNumber={}",
@@ -159,7 +159,7 @@ public class DispatchPipelineService {
         NovuClient.NovuResponse novuResponse = novuClient.triggerWithProviderConfig(
                 resolvedTemplate.getTemplateKey(),
                 subscriberId,
-                whatsappPhone,
+                recipientPhone,
                 event.getData(),
                 event.getEventId(),
                 resolvedProvider,
@@ -192,7 +192,7 @@ public class DispatchPipelineService {
         return novuClient.trigger(
                 templateKey,
                 subscriberId,
-                formatWhatsappPhone(phone, null, requestInfo),
+                formatRecipientPhone(phone, null, "whatsapp", requestInfo),
                 payload,
                 transactionId,
                 buildTemplateOverrides(contentSid, contentVariables));
@@ -246,32 +246,39 @@ public class DispatchPipelineService {
         return overrides;
     }
 
-    private String formatWhatsappPhone(String mobile, String tenantId, RequestInfo requestInfo) {
+    private static final String WHATSAPP_PREFIX = "whatsapp:";
+
+    private String formatRecipientPhone(String mobile, String tenantId, String channel, RequestInfo requestInfo) {
         if (!StringUtils.hasText(mobile)) {
             return null;
         }
+        // The whatsapp: prefix is a Twilio WhatsApp-channel addressing scheme. Applying it on
+        // an sms-channel provider yields an Invalid From/To pair (Twilio 21910). Normalise to a
+        // bare E.164 number first, then re-apply the prefix only for the whatsapp channel.
+        boolean isWhatsapp = "whatsapp".equalsIgnoreCase(channel);
         String normalized = mobile.trim();
-        if (normalized.startsWith("whatsapp:")) {
-            return normalized;
+        if (normalized.startsWith(WHATSAPP_PREFIX)) {
+            normalized = normalized.substring(WHATSAPP_PREFIX.length()).trim();
         }
+
+        String e164;
         if (normalized.startsWith("+")) {
-            return "whatsapp:" + normalized;
-        }
-        // Fetch default country-code prefix from MDMS
-        if (!StringUtils.hasText(tenantId)) {
-            throw new CustomException("NB_TENANT_ID_MISSING",
-                    "tenantId is required to resolve phone country-code prefix from MDMS");
-        }
-        MobileValidationConfig validationConfig = mdmsServiceClient.getMobileValidationConfig( tenantId, requestInfo );
-
-        if (normalized.matches(validationConfig.getPattern())) {
-
-            return "whatsapp:"+ validationConfig.getPrefix()+ normalized;
-        }
-        else {
+            e164 = normalized;
+        } else {
+            // Fetch default country-code prefix from MDMS
+            if (!StringUtils.hasText(tenantId)) {
+                throw new CustomException("NB_TENANT_ID_MISSING",
+                        "tenantId is required to resolve phone country-code prefix from MDMS");
+            }
+            MobileValidationConfig validationConfig = mdmsServiceClient.getMobileValidationConfig(tenantId, requestInfo);
+            if (!normalized.matches(validationConfig.getPattern())) {
                 throw new CustomException("INVALID_MOBILE_NUMBER",
-                    "Mobile number is not matching with default mobile pattern in MDMS");
+                        "Mobile number is not matching with default mobile pattern in MDMS");
+            }
+            e164 = validationConfig.getPrefix() + normalized;
         }
+
+        return isWhatsapp ? WHATSAPP_PREFIX + e164 : e164;
     }
 
     private DerivedContext deriveContext(ComplaintsDomainEvent event) {
