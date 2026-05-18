@@ -2,9 +2,13 @@
 # bootstrap-fixup.sh — un-stick an onboarding session whose Phase 1 bootstrap
 # left gaps that the upstream wizard code couldn't backfill after the fact.
 #
-# Companion to digit-configurator#66. Runs the data-side fixes that the wizard
-# code changes alone can't apply to a stack that's already past Phase 1:
-#   1. Bulk-copy MDMS data SOURCE → TARGET (everything except tenant.tenants).
+# Companion to digit-configurator#66. Also a complete standalone state-root
+# bootstrap for the non-wizard path (API / CI / scripted onboarding): it copies
+# both the SCHEMAS and the DATA, so a fresh root needs no prior Phase-1 run.
+#   1. Bulk-copy MDMS schema definitions + data SOURCE → TARGET
+#      (data deny-lists tenant.tenants; schemas copied wholesale). The schema
+#      copy is what makes _create against a brand-new root work at all —
+#      without it every Phase 3-4 write fails SCHEMA_DEFINITION_NOT_FOUND_ERR.
 #   2. Restart MDMS services so in-process caches reload.
 #   3. Bust the localization service cache.
 #   4. Detect orphan HRMS rows (employees with no eg_user) and print a
@@ -25,17 +29,41 @@ HOST=${HOST:-http://localhost:16000}      # Kong base URL
 SOURCE=${SOURCE:-pg}                       # MDMS data source tenant
 TARGET=${TARGET:-mz}                       # New state root being repaired
 
-echo "=== [1/5] Copy MDMS data $SOURCE → $TARGET (deny-list = tenant.tenants) ==="
-# Dual de-dup: we skip a SOURCE row if either
-#   (a) (TARGET, schemacode, uniqueidentifier) already exists — exact storage-key match, or
-#   (b) (TARGET, schemacode, data) already exists — same logical content under a different
-#       uniqueidentifier. (b) catches the case where Phase 1's bootstrap re-keyed pg's data
-#       with a code-based uniqueIdentifier (DEPT_10) while pg's seed uses a content-hashed
-#       one ("0e8a47…"). Without (b) we'd insert a second copy of every bootstrap-covered
-#       row, doubling counts in dropdowns and role lookups.
+echo "=== [1/5] Copy MDMS schema defs + data $SOURCE → $TARGET (deny-list = tenant.tenants) ==="
+# Two copies, one transaction, schemas first:
+#
+#   (1) eg_mdms_schema_definition — the SCHEMAS. Without these at $TARGET every
+#       _create against the new root (or any city under it) fails with
+#       SCHEMA_DEFINITION_NOT_FOUND_ERR — mdms-v2 has no parent fallback on
+#       _create. This mirrors the configurator wizard's tenantBootstrap.ts
+#       'schemas' step; copying it here makes the script a complete bootstrap
+#       for the non-wizard path instead of a data-only backfill. De-dup by
+#       (tenant, code).
+#
+#   (2) eg_mdms_data — the DATA. Dual de-dup: skip a SOURCE row if either
+#       (a) (TARGET, schemacode, uniqueidentifier) already exists — exact
+#       storage-key match, or (b) (TARGET, schemacode, data) already exists —
+#       same logical content under a different uniqueidentifier. (b) catches
+#       the case where Phase 1's bootstrap re-keyed pg's data with a code-based
+#       uniqueIdentifier (DEPT_10) while pg's seed uses a content-hashed one
+#       ("0e8a47…"). Without (b) we'd insert a second copy of every
+#       bootstrap-covered row, doubling counts in dropdowns and role lookups.
 docker exec -i docker-postgres psql -U egov -d egov <<SQL
 \set ON_ERROR_STOP 1
 BEGIN;
+INSERT INTO eg_mdms_schema_definition
+       (id,                tenantid, code,    description,   definition,  isactive,
+        createdby,         createdtime,
+        lastmodifiedby,    lastmodifiedtime)
+SELECT  gen_random_uuid(), '$TARGET', s.code, s.description, s.definition, s.isactive,
+        'bootstrap-fixup', (extract(epoch from now())*1000)::bigint,
+        'bootstrap-fixup', (extract(epoch from now())*1000)::bigint
+FROM   eg_mdms_schema_definition s
+WHERE  s.tenantid = '$SOURCE'
+  AND  NOT EXISTS (
+        SELECT 1 FROM eg_mdms_schema_definition d
+        WHERE  d.tenantid = '$TARGET' AND d.code = s.code
+       );
 INSERT INTO eg_mdms_data
        (id,                tenantid, schemacode, uniqueidentifier, data, isactive,
         createdby,         createdtime,
@@ -54,6 +82,12 @@ WHERE  src.tenantid   = '$SOURCE'
        )
 ON CONFLICT (tenantid, schemacode, uniqueidentifier) DO NOTHING;
 COMMIT;
+
+\echo ''
+\echo '--- schema definitions now at '"'$TARGET'"' vs '"'$SOURCE'"':'
+SELECT '$SOURCE' AS tenant, count(*) FROM eg_mdms_schema_definition WHERE tenantid='$SOURCE'
+UNION ALL
+SELECT '$TARGET' AS tenant, count(*) FROM eg_mdms_schema_definition WHERE tenantid='$TARGET';
 
 \echo ''
 \echo '--- rows now at '"'$TARGET'"' by schema:'
