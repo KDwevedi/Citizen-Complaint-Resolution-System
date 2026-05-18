@@ -2,31 +2,36 @@
 # mac-stack-up.sh — bring the DIGIT stack up on macOS/Rosetta.
 #
 # Why this exists: under Rosetta the JVM services cold-start slower than
-# compose's `depends_on: condition: service_healthy` timeouts, so the
-# first `docker compose up -d` aborts ("dependency failed to start")
-# even though the containers it created keep warming and DO go healthy
-# moments later.
+# compose's `depends_on: condition: service_healthy` timeouts, so a
+# `docker compose up -d` aborts ("dependency failed to start") even
+# though the containers it created keep warming and DO go healthy
+# moments later. A plain retry loop (no teardown between attempts) lets
+# JVM warmth accumulate until it converges.
 #
-# Strategy (validated on the mzmac bring-up):
-#   1. ONE clean `down --remove-orphans` to guarantee a single
-#      consistent project network and no leaked endpoints from a prior
-#      partial run. Volumes are KEPT (no -v) so the db_fast_path
-#      Postgres dump persists and is not reloaded.
-#   2. Then a plain `up -d` retry loop with NO network/endpoint
-#      surgery. Containers are NOT torn down between attempts, so JVM
-#      warmth accumulates: each `up -d` starts more of the tier as its
-#      deps cross `service_healthy`, converging in a few attempts.
+# Two call sites:
+#   converge#1 (initial Start DIGIT stack): a one-time clean
+#     `down --remove-orphans` (volumes KEPT → db_fast_path dump
+#     persists) guarantees a single consistent project network with no
+#     leaked endpoints from a prior partial run, THEN the retry loop.
+#   converge#2 (post-OpenBao "Recreate services with new env"): set
+#     MAC_STACK_UP_SKIP_DOWN=1. The network is already consistent from
+#     converge#1 and only .env changed, so we must NOT down — a plain
+#     retried `up -d` recreates just the env-changed (JVM) containers,
+#     leaves infra + openbao running. This ~halves total deploy time
+#     AND avoids recreating/re-sealing openbao (so the post-converge#2
+#     OpenBao re-unseal becomes a no-op safety net rather than required).
 #
-# An earlier version tried to "preserve warmth" by force-disconnecting
-# leaked endpoints between attempts WITHOUT a down. That re-orphaned the
-# still-running Postgres from the recreated network -> every JVM died
-# with `UnknownHostException: postgres`. Do NOT reintroduce per-endpoint
-# `docker network disconnect`; the single up-front `down` is what makes
-# this correct.
+# Do NOT reintroduce per-endpoint `docker network disconnect` between
+# attempts: an earlier version did and re-orphaned the still-running
+# Postgres from the recreated network → every JVM died with
+# `UnknownHostException: postgres`. The single up-front down (converge#1
+# only) is what makes the network correct.
 #
 # Linux never needs this (the playbook runs a plain `up -d` there).
 #
 # Usage: mac-stack-up.sh <digit_dir> <compose_profiles> <compose_files...>
+#   env: MAC_STACK_UP_SKIP_DOWN=1  → skip the clean-baseline down (converge#2)
+#        MAC_STACK_UP_MAX (14), MAC_STACK_UP_DELAY (40)
 set -uo pipefail
 
 DIGIT_DIR="$1"; PROFILES="$2"; shift 2
@@ -36,9 +41,17 @@ DELAY="${MAC_STACK_UP_DELAY:-40}"
 
 cd "$DIGIT_DIR" || { echo "mac-stack-up: cannot cd $DIGIT_DIR"; exit 2; }
 
-# 1) One clean baseline (keep volumes -> Postgres dump persists).
-echo "mac-stack-up: clean baseline (down --remove-orphans, volumes kept)…"
-COMPOSE_PROFILES="$PROFILES" docker compose $COMPOSE_ARGS down --remove-orphans >/dev/null 2>&1 || true
+# 1) One clean baseline (converge#1 only). Volumes kept → pg dump persists.
+#    Skipped for converge#2 (MAC_STACK_UP_SKIP_DOWN=1): network already
+#    consistent, only .env changed; a down here would needlessly cold-
+#    restart the whole stack (incl. openbao → re-sealed) and ~double the
+#    deploy time.
+if [ -z "${MAC_STACK_UP_SKIP_DOWN:-}" ]; then
+  echo "mac-stack-up: clean baseline (down --remove-orphans, volumes kept)…"
+  COMPOSE_PROFILES="$PROFILES" docker compose $COMPOSE_ARGS down --remove-orphans >/dev/null 2>&1 || true
+else
+  echo "mac-stack-up: SKIP_DOWN set — plain up -d retry (converge#2; preserve infra+openbao)…"
+fi
 
 # 2) Plain up -d retry loop; no network surgery, warmth accumulates.
 for i in $(seq 1 "$MAX"); do
