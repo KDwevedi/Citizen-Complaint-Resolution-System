@@ -433,15 +433,14 @@
     # macOS/Rosetta: JVM services cold-start slower than compose's
     # depends_on: service_healthy timeouts, so the first `up -d` aborts
     # ("dependency failed to start") even though the containers it
-    # created keep warming and DO go healthy. A bare retry then hits
-    # leaked network endpoints ("endpoint <svc> already exists"). The
-    # helper converges by clearing only non-running leaked endpoints and
-    # re-issuing `up -d` (preserving accumulated JVM warmth — no `down`).
+    # created keep warming and DO go healthy. The helper does ONE clean
+    # `down --remove-orphans` (volumes kept → Postgres dump persists)
+    # then a plain `up -d` retry loop with no network surgery, so JVM
+    # warmth accumulates across attempts and the tier converges.
     - name: "Start DIGIT stack (macOS/Rosetta — converge loop)"
       ansible.builtin.command: >-
         bash {{ playbook_dir }}/files/mac-stack-up.sh
         "{{ digit_dir }}"
-        "{{ digit_dir | basename }}_egov-network"
         "{{ compose_profiles }}"
         {{ compose_files }}
       register: mac_stack_up

@@ -5,48 +5,50 @@
 # compose's `depends_on: condition: service_healthy` timeouts, so the
 # first `docker compose up -d` aborts ("dependency failed to start")
 # even though the containers it created keep warming and DO go healthy
-# moments later. A plain retry then fails differently: the aborted up
-# leaves leaked network endpoints, so the next up collides with
-# "endpoint <svc> already exists in network".
+# moments later.
 #
-# Recovery (preserves accumulated JVM warmth — does NOT `down`):
-#   loop:
-#     - disconnect ONLY non-running containers' leaked endpoints from
-#       the project network (running containers are left untouched)
-#     - `up -d` (no-op for healthy ones; starts any "Created" ones whose
-#       deps are now healthy)
-#     - exit 0 the moment up -d returns 0 (all deps satisfied)
-# Converges as JVMs warm. Linux never needs this (handled by the
-# playbook's plain up -d on non-Darwin).
+# Strategy (validated on the mzmac bring-up):
+#   1. ONE clean `down --remove-orphans` to guarantee a single
+#      consistent project network and no leaked endpoints from a prior
+#      partial run. Volumes are KEPT (no -v) so the db_fast_path
+#      Postgres dump persists and is not reloaded.
+#   2. Then a plain `up -d` retry loop with NO network/endpoint
+#      surgery. Containers are NOT torn down between attempts, so JVM
+#      warmth accumulates: each `up -d` starts more of the tier as its
+#      deps cross `service_healthy`, converging in a few attempts.
 #
-# Usage: mac-stack-up.sh <digit_dir> <net_name> <compose_profiles> <compose_files...>
+# An earlier version tried to "preserve warmth" by force-disconnecting
+# leaked endpoints between attempts WITHOUT a down. That re-orphaned the
+# still-running Postgres from the recreated network -> every JVM died
+# with `UnknownHostException: postgres`. Do NOT reintroduce per-endpoint
+# `docker network disconnect`; the single up-front `down` is what makes
+# this correct.
+#
+# Linux never needs this (the playbook runs a plain `up -d` there).
+#
+# Usage: mac-stack-up.sh <digit_dir> <compose_profiles> <compose_files...>
 set -uo pipefail
 
-DIGIT_DIR="$1"; NET="$2"; PROFILES="$3"; shift 3
+DIGIT_DIR="$1"; PROFILES="$2"; shift 2
 COMPOSE_ARGS="$*"             # e.g. "-f docker-compose.egov-digit.yaml -f docker-compose.fast-path.yml"
-MAX="${MAC_STACK_UP_MAX:-10}"
-DELAY="${MAC_STACK_UP_DELAY:-35}"
+MAX="${MAC_STACK_UP_MAX:-14}"
+DELAY="${MAC_STACK_UP_DELAY:-40}"
 
-cd "$DIGIT_DIR" || { echo "cannot cd $DIGIT_DIR"; exit 2; }
+cd "$DIGIT_DIR" || { echo "mac-stack-up: cannot cd $DIGIT_DIR"; exit 2; }
 
+# 1) One clean baseline (keep volumes -> Postgres dump persists).
+echo "mac-stack-up: clean baseline (down --remove-orphans, volumes kept)…"
+COMPOSE_PROFILES="$PROFILES" docker compose $COMPOSE_ARGS down --remove-orphans >/dev/null 2>&1 || true
+
+# 2) Plain up -d retry loop; no network surgery, warmth accumulates.
 for i in $(seq 1 "$MAX"); do
-  # Clear leaked endpoints belonging to containers that are NOT running
-  # (a leaked endpoint blocks recreation of that service on the next up).
-  for ep in $(docker network inspect "$NET" \
-        --format '{{range $k,$v := .Containers}}{{$v.Name}} {{end}}' 2>/dev/null); do
-    st="$(docker inspect "$ep" --format '{{.State.Status}}' 2>/dev/null || echo gone)"
-    if [ "$st" != "running" ]; then
-      docker network disconnect -f "$NET" "$ep" >/dev/null 2>&1 || true
-    fi
-  done
-
   if COMPOSE_PROFILES="$PROFILES" docker compose $COMPOSE_ARGS up -d >/tmp/mac-stack-up.$i.log 2>&1; then
     echo "mac-stack-up: converged on attempt $i/$MAX"
     exit 0
   fi
-  reason="$(grep -oE 'dependency failed to start[^"]*|endpoint with name [^ ]* already exists|exited \([0-9]+\)' \
+  reason="$(grep -oE 'dependency failed to start[^"]*|exited \([0-9]+\)|UnknownHostException: [a-z]+|no space left on device' \
             /tmp/mac-stack-up.$i.log | tail -1)"
-  echo "mac-stack-up: attempt $i/$MAX not yet converged${reason:+ — $reason}; warming ${DELAY}s…"
+  echo "mac-stack-up: attempt $i/$MAX not yet converged${reason:+ — $reason}; JVMs warming ${DELAY}s…"
   sleep "$DELAY"
 done
 
