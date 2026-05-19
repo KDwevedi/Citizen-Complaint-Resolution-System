@@ -41,6 +41,36 @@ DELAY="${MAC_STACK_UP_DELAY:-40}"
 
 cd "$DIGIT_DIR" || { echo "mac-stack-up: cannot cd $DIGIT_DIR"; exit 2; }
 
+# 0) Already-converged short-circuit. If every container of this compose
+#    project is already running + healthy (containers without a healthcheck
+#    just need to be running; one-shot exited-0 jobs are fine), do NOTHING:
+#    no down, no up-loop. This makes a *re-run* into a working stack a no-op
+#    instead of cold-restarting it via the converge#1 down (~20-45min on
+#    Rosetta) or needlessly churning it. The downstream playbook gates
+#    (Kong/HRMS health) still run and will catch a genuinely-bad stack, so a
+#    false "healthy" is self-correcting. Force a real converge with
+#    MAC_STACK_UP_FORCE=1 (e.g. to deliberately rebuild from a clean down).
+if [ -z "${MAC_STACK_UP_FORCE:-}" ]; then
+  ids="$(COMPOSE_PROFILES="$PROFILES" docker compose $COMPOSE_ARGS ps -q 2>/dev/null || true)"
+  if [ -n "$ids" ]; then
+    converged=1
+    for cid in $ids; do
+      info="$(docker inspect -f '{{.State.Status}}|{{.State.ExitCode}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null || echo 'unknown|1|none')"
+      st="${info%%|*}"; rest="${info#*|}"; ec="${rest%%|*}"; hh="${rest#*|}"
+      case "$st" in
+        running)  case "$hh" in healthy|none) : ;; *) converged=0 ;; esac ;;  # 'starting'/'unhealthy' ⇒ not converged
+        exited)   [ "$ec" = "0" ] || converged=0 ;;                            # one-shot jobs may exit 0
+        *)        converged=0 ;;                                               # restarting/created/dead/...
+      esac
+      [ "$converged" = 0 ] && break
+    done
+    if [ "$converged" = 1 ]; then
+      echo "mac-stack-up: stack already up & healthy ($(echo "$ids" | wc -w | tr -d ' ') containers) — skipping down + up-loop (no-op; set MAC_STACK_UP_FORCE=1 to override)"
+      exit 0
+    fi
+  fi
+fi
+
 # 1) One clean baseline (converge#1 only). Volumes kept → pg dump persists.
 #    Skipped for converge#2 (MAC_STACK_UP_SKIP_DOWN=1): network already
 #    consistent, only .env changed; a down here would needlessly cold-
