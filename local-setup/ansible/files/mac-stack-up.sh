@@ -84,16 +84,59 @@ else
 fi
 
 # 2) Plain up -d retry loop; no network surgery, warmth accumulates.
+#
+# OBSERVABILITY: this runs as an `ansible.builtin.command`, and ansible
+# buffers a task's stdout until the task ENDS — so the per-attempt echoes
+# below are invisible for the whole 10-40min converge and the operator
+# can't tell progress from hang. Fix: append a timestamped, tail-able
+# progress line (attempt, reason, live healthy-count) to a STABLE path
+# every attempt. While the deploy runs, in another terminal:
+#     tail -f /tmp/mac-stack-up.progress
+PROG=/tmp/mac-stack-up.progress
+ts(){ date '+%H:%M:%S'; }
+# up-or-healthy / total for this compose project (reuses the robust
+# inspect approach from the already-healthy short-circuit above).
+health_summary(){
+  local cid s n=0 h=0
+  for cid in $(COMPOSE_PROFILES="$PROFILES" docker compose $COMPOSE_ARGS ps -q 2>/dev/null); do
+    n=$((n+1))
+    s="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || echo '?')"
+    case "$s" in healthy|running) h=$((h+1)) ;; esac
+  done
+  echo "${h}/${n} up-or-healthy"
+}
+echo "$(ts) mac-stack-up: START — max ${MAX} attempts, ${DELAY}s apart. tail -f $PROG for live progress." > "$PROG"
 for i in $(seq 1 "$MAX"); do
   if COMPOSE_PROFILES="$PROFILES" docker compose $COMPOSE_ARGS up -d >/tmp/mac-stack-up.$i.log 2>&1; then
-    echo "mac-stack-up: converged on attempt $i/$MAX"
+    msg="$(ts) mac-stack-up: CONVERGED on attempt $i/$MAX — $(health_summary)"
+    echo "$msg"; echo "$msg" >> "$PROG"
     exit 0
+  fi
+  # Leaked-endpoint state is UNRECOVERABLE by retrying — every attempt fails
+  # identically until the daemon's network state is rebuilt. Detecting it and
+  # looping 14×40s is ~10min of invisible doomed waiting (this cost ~3h once).
+  # Fail FAST and loud with the exact remedy instead.
+  if grep -qE 'endpoint with name .* already exists' /tmp/mac-stack-up.$i.log; then
+    stale="$(grep -oE 'endpoint with name [^ ]+ already exists in network [^ ".]+' /tmp/mac-stack-up.$i.log | tail -1)"
+    {
+      echo "$(ts) mac-stack-up: ABORT — LEAKED NETWORK ENDPOINT (unrecoverable by retry): ${stale:-endpoint already exists}"
+      echo "  Cause: orphaned libnetwork endpoint from a prior/interrupted run. Retrying will NEVER clear it."
+      echo "  FIX (zero data loss — volumes/images persist):"
+      echo "    1) stop this deploy"
+      echo "    2) docker ps -aq | xargs -r docker rm -f"
+      echo "    3) restart the engine:  orb stop && orb start   (Docker Desktop: quit & reopen Docker)"
+      echo "    4) docker network rm \$(docker network ls --format '{{.Name}}' | grep _egov-network)"
+      echo "    5) re-run deploy.sh  PLAIN  (never MAC_STACK_UP_SKIP_DOWN=1 — it skips the down that prevents this)"
+    } | tee -a "$PROG" >&2
+    exit 3
   fi
   reason="$(grep -oE 'dependency failed to start[^"]*|exited \([0-9]+\)|UnknownHostException: [a-z]+|no space left on device' \
             /tmp/mac-stack-up.$i.log | tail -1)"
-  echo "mac-stack-up: attempt $i/$MAX not yet converged${reason:+ — $reason}; JVMs warming ${DELAY}s…"
+  msg="$(ts) mac-stack-up: attempt $i/$MAX not yet converged${reason:+ — $reason} — $(health_summary); JVMs warming ${DELAY}s…"
+  echo "$msg"; echo "$msg" >> "$PROG"
   sleep "$DELAY"
 done
 
-echo "mac-stack-up: did NOT converge after $MAX attempts" >&2
+msg="$(ts) mac-stack-up: did NOT converge after $MAX attempts — $(health_summary)"
+echo "$msg" >&2; echo "$msg" >> "$PROG"
 exit 1
