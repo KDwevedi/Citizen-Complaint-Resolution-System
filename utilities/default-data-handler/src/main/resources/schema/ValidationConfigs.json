@@ -53,5 +53,51 @@
       "x-ref-schema": [],
       "additionalProperties": false
     }
+  },
+  {
+    "tenantId": "{tenantid}",
+    "code": "ValidationConfigs.postalCodeValidation",
+    "description": "Per-tenant postal-code validation rule. Mirrors mobileNumberValidation so consumers can read both via the same MDMS pathway and the in-code postalCodeKE constant becomes a documented fallback rather than the actual runtime rule. `validationName: defaultPostalCodeValidation` is the lookup key. Kenya is 5 digits (e.g. 00100); Mozambique is 4 digits; UK is alphanumeric — each tenant overrides at its own tenantId.",
+    "isActive": true,
+    "definition": {
+      "type": "object",
+      "title": "Generated schema for Root",
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "required": [
+        "validationName",
+        "rules"
+      ],
+      "x-unique": [
+        "validationName"
+      ],
+      "properties": {
+        "validationName": {
+          "type": "string"
+        },
+        "rules": {
+          "type": "object",
+          "required": [
+            "pattern"
+          ],
+          "properties": {
+            "pattern": {
+              "type": "string"
+            },
+            "minLength": {
+              "type": "number"
+            },
+            "maxLength": {
+              "type": "number"
+            },
+            "errorMessage": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "x-ref-schema": [],
+      "additionalProperties": false
+    }
   }
 ]

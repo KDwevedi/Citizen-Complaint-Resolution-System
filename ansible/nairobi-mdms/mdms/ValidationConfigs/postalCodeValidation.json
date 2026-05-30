@@ -1,0 +1,14 @@
+[
+  {
+    "tenantId": "ke",
+    "data": {
+      "validationName": "defaultPostalCodeValidation",
+      "rules": {
+        "pattern": "^[0-9]{5}$",
+        "minLength": 5,
+        "maxLength": 5,
+        "errorMessage": "Enter a valid 5-digit postal code (e.g. 00100)"
+      }
+    }
+  }
+]
