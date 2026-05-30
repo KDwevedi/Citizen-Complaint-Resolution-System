@@ -1,0 +1,15 @@
+{
+  "name": "ccrs-theme-playwright",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright smoke + theme validation suite targeting the ovh-cloud-dev deployment of validate/all-themes",
+  "scripts": {
+    "install:browsers": "playwright install chromium",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
