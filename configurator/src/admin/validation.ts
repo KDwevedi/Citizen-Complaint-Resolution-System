@@ -46,10 +46,20 @@ export const phoneKE = raRegex(
 );
 
 /**
- * Kenya postal code: 5 digits (e.g. `00100` Nairobi GPO). The form is
- * optional in the complaint create flow, but if the operator types
- * anything it has to be the right shape — Gurjeet's #478 retest flagged
- * "random pincode accepted" because there was no validator wired.
+ * Kenya postal code: 5 digits (e.g. `00100` Nairobi GPO).
+ *
+ * **This is the documented FALLBACK** for the configurator's complaint forms
+ * when MDMS `ValidationConfigs.postalCodeValidation` isn't seeded for the
+ * tenant. The real runtime rule comes from MDMS — see the seed at
+ * `ansible/nairobi-mdms/mdms/ValidationConfigs/postalCodeValidation.json`
+ * and the default-install copy under
+ * `utilities/default-data-handler/.../mdmsData[-dev]/ValidationConfigs/`.
+ * Tenants outside Kenya override by upserting a record at their own
+ * `tenantId` (e.g. Mozambique 4 digits, UK alphanumeric).
+ *
+ * Same pattern as `phoneKE` / `useMobileValidator`'s FALLBACK — keep this
+ * constant as the last-resort default so the validator never breaks when
+ * MDMS is silent, but expect production tenants to read from MDMS.
  */
 export const postalCodeKE = raRegex(
   /^[0-9]{5}$/,
