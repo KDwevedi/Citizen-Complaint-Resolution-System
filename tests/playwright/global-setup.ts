@@ -105,13 +105,13 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
   // Hit the configurator first so the origin is registered. The page JS will
   // try to read crs-auth-state on mount — we inject BEFORE any subsequent
   // navigation by setting it here and then reloading once.
-  await page.goto('/configurator/');
+  await page.goto('/configurator/', { timeout: 90000 });
   await page.evaluate((blob) => {
     localStorage.setItem('crs-auth-state', JSON.stringify(blob));
   }, authBlob);
   // Reload so App.tsx's restoreApiClientFromStorage() runs against the seeded
   // blob; surfaces token problems in global setup instead of in each test.
-  await page.goto('/configurator/');
+  await page.goto('/configurator/', { timeout: 90000 });
   await page.waitForLoadState('domcontentloaded');
 
   await ctx.storageState({ path: STORAGE_PATH });

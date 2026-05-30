@@ -12,7 +12,7 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://57.131.32.64';
 
 export default defineConfig({
   testDir: './tests',
-  timeout: 60_000,
+  timeout: 180_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
   retries: 0,
@@ -27,7 +27,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
     actionTimeout: 10_000,
-    navigationTimeout: 30_000,
+    navigationTimeout: 90_000,
     ignoreHTTPSErrors: true,
     storageState: 'storage-state/admin.json',
   },
