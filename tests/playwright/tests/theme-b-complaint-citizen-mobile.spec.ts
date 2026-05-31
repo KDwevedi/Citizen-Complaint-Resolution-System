@@ -7,12 +7,18 @@ import { selectRadixOption } from '../lib/radix';
  * Source: configurator/src/admin/validation.ts -> `phoneKE`.
  * Wired at: configurator/src/resources/complaints/ComplaintCreate.tsx via
  * <DigitFormInput source="citizen.mobileNumber" validate={[v.required, v.phoneKE]} />.
+ *
+ * Asserts the validator is ACTUALLY RUNNING (not the trivial aria-invalid in
+ * [false, null] check that passes even when no validator is wired). The pair
+ * NEG (rejects "abc123") + POS (accepts "0712345678") only passes when
+ * v.phoneKE is on the field — revert the source fix and NEG flips.
  */
 
 const COMPLAINT_CREATE_URL = '/configurator/manage/complaints/create';
 const CITIZEN_MOBILE = 'input[name="citizen.mobileNumber"]';
 const DESCRIPTION_INPUT = 'textarea[name="description"], input[name="description"]';
 const PINCODE_INPUT = 'input[name="address.pincode"]';
+const HELP_TEXT = /Enter a valid Kenyan mobile starting with 7 or 1/i;
 
 async function fillRequiredExceptCitizenMobile(page: import('@playwright/test').Page) {
   await selectRadixOption(page, /Select complaint type/i, null);
@@ -21,15 +27,38 @@ async function fillRequiredExceptCitizenMobile(page: import('@playwright/test').
 }
 
 test.describe('Theme B — Configurator Complaint citizen mobile', () => {
-  test('trunk-zero Kenya mobile passes phoneKE pattern', async ({ page }) => {
+  test('rejects clearly invalid mobile with Kenya help text + aria-invalid', async ({ page }) => {
     await page.goto(COMPLAINT_CREATE_URL);
     await page.waitForSelector(CITIZEN_MOBILE, { timeout: 30_000 });
     await page.waitForTimeout(1_500);
     const mobile = page.locator(CITIZEN_MOBILE);
-    await mobile.fill('0712345678');
+    await mobile.focus();
+    await page.waitForTimeout(800);
+    // "abc123" can't match /^0?[17][0-9]{8}$/ on any axis (letters, length,
+    // leading digit), so if v.phoneKE is wired the validator MUST fire.
+    await mobile.pressSequentially('abc123', { delay: 180 });
     await page.waitForTimeout(1_500);
     await mobile.blur();
+    await page.waitForTimeout(2_000);
+    await expect(page.getByText(HELP_TEXT).first()).toBeVisible();
+    expect(await mobile.getAttribute('aria-invalid')).toBe('true');
     await page.waitForTimeout(1_500);
+  });
+
+  test('accepts trunk-zero Kenya mobile (no help text, not invalid)', async ({ page }) => {
+    await page.goto(COMPLAINT_CREATE_URL);
+    await page.waitForSelector(CITIZEN_MOBILE, { timeout: 30_000 });
+    await page.waitForTimeout(1_500);
+    const mobile = page.locator(CITIZEN_MOBILE);
+    await mobile.focus();
+    await page.waitForTimeout(800);
+    await mobile.pressSequentially('0712345678', { delay: 180 });
+    await page.waitForTimeout(1_500);
+    await mobile.blur();
+    await page.waitForTimeout(2_000);
+    // Help text must NOT appear (catches a regression where the pattern
+    // accidentally rejects the trunk-zero form).
+    await expect(page.getByText(HELP_TEXT)).toHaveCount(0);
     expect(['false', null]).toContain(await mobile.getAttribute('aria-invalid'));
     await page.waitForTimeout(1_500);
   });

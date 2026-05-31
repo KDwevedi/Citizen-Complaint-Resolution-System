@@ -60,7 +60,7 @@ export function ComplaintCreate() {
           <DigitFormInput
             source="citizen.mobileNumber"
             label="Mobile number"
-            validate={v.required}
+            validate={[v.required, v.phoneKE]}
             help="Used to identify the citizen. User-service upserts a CITIZEN account by mobile."
           />
           <DigitFormInput
