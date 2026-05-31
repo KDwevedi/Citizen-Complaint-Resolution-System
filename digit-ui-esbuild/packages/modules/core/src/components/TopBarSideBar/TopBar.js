@@ -146,8 +146,8 @@ const TopBar = ({
       }}
       className="digit-employee-header"
       img={logoUrl}
-      logoWidth={"64px"}
-      logoHeight={"48px"}
+      logoWidth={"96px"}
+      logoHeight={"64px"}
       logo={(loggedin ? cityDetails?.logoId : stateInfo?.statelogo)||DEFAULT_EGOV_LOGO}
       onImageClick={() => {}}
       onLogoClick={() => {}}

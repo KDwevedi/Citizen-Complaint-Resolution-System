@@ -29,7 +29,13 @@ const Menu = (props) => {
   };
 
 
-  const secondaryIconColor = Colors.lightTheme.generic.inputBorder;
+  // Idle (non-hovered) menu rows paint on a white card surface; the prior
+  // `generic.inputBorder` (#505A5F) wasn't reliably winning the cascade against
+  // SVG presentation-attribute fills, so idle Edit/Logout icons rendered
+  // white-on-white. `text.primary` (#363636) renders as visible dark gray
+  // regardless. Active rows still paint orange bg + white icon via
+  // primaryIconColor below. Closes egovernments/CCRS#505 sub-4.
+  const secondaryIconColor = Colors.lightTheme.text.primary;
   const primaryIconColor = Colors.lightTheme.paper.primary;
 
   const IconRender = (iconReq, isActive) => {

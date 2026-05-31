@@ -5958,3 +5958,18 @@ header.digit-header .digit-dropdown-master {
 .navbar .digit-dropdown-employee-select-wrap:focus-within {
   border-color: revert !important;
 }
+
+/* Profile-circle initial letter centering (closes egovernments/CCRS#505
+ * sub-2). Vendor's `.header-dropdown-profile.text` is a 2rem flex circle
+ * but doesn't constrain font-size/line-height on the letter inside, so
+ * the glyph inherits the navbar's larger line-height and renders top-left
+ * rather than centered. Fixed line-height matches the circle height so
+ * flex vertical centering actually centers the cap. Upstream source for
+ * digit-ui-components SCSS isn't vendored in this repo, so the rule
+ * lands here instead of an SCSS partial. */
+.header-dropdown-profile.text,
+.header-dropdown-profile.dark.text {
+  font-size: 0.875rem;
+  line-height: 2rem;
+  text-align: center;
+}
