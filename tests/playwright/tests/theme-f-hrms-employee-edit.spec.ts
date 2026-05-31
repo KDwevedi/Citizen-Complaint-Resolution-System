@@ -20,7 +20,11 @@ import { selectRadixOption } from '../lib/radix';
 const EMPLOYEE_LIST_URL = '/configurator/manage/employees';
 
 test.describe('Theme F — HRMS Employee edit through configurator', () => {
-  test.fixme('edit first employee status and save without ensureAudit NPE', async ({ page }) => {
+  // Un-fixme'd: the storage-state'd ADMIN has /configurator/manage/employees
+  // access on ovh-cloud-dev. If a future deployment drops the role, the
+  // datagrid selector will time out (visible failure) — that's the right
+  // failure mode for "test infra missing", not a silent skip.
+  test('edit first employee status and save without ensureAudit NPE', async ({ page }) => {
     await page.goto(EMPLOYEE_LIST_URL);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(2_000);

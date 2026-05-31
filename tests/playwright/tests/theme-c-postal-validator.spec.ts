@@ -45,6 +45,36 @@ test.describe('Theme C — Configurator Complaint pincode validation', () => {
     await page.waitForTimeout(1_000);
     await page.getByRole('button', { name: /^Create$/i }).click();
     await page.waitForTimeout(3_500);
+    // Postal-validator help text must not appear (the original assertion).
     await expect(page.getByText(HELP_TEXT).first()).toHaveCount(0);
+
+    // Strengthening: also assert the form actually progressed. Without this,
+    // the test passes if Create silently no-ops (no help text, no submit) —
+    // e.g. a regression that strips the submit handler entirely. We accept
+    // EITHER a URL change away from /create OR a success toast / "Element
+    // created" indicator. Lenient (Promise.race) so a slow API doesn't
+    // false-fail; we only need one signal that submit fired.
+    const urlChanged = page
+      .waitForURL((u) => !u.pathname.endsWith('/create'), { timeout: 8_000 })
+      .then(() => 'url-changed');
+    const toastVisible = page
+      .locator('[role="status"], [role="alert"]')
+      .first()
+      .waitFor({ state: 'visible', timeout: 8_000 })
+      .then(() => 'toast');
+    const successText = page
+      .getByText(/created|success/i)
+      .first()
+      .waitFor({ state: 'visible', timeout: 8_000 })
+      .then(() => 'success-text');
+    const winner = await Promise.race([
+      urlChanged,
+      toastVisible,
+      successText,
+    ]).catch(() => null);
+    expect(
+      winner,
+      'expected URL change OR toast OR success text after a clean submit',
+    ).not.toBeNull();
   });
 });
