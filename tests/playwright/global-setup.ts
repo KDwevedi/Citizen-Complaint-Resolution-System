@@ -92,6 +92,14 @@ function buildAuthStateBlob(token: string, userRequest: Record<string, unknown>)
 export default async function globalSetup(_config: FullConfig): Promise<void> {
   fs.mkdirSync(STORAGE_DIR, { recursive: true });
 
+  // Some tests (the bomet demo recordings) do their own login via the UI
+  // and don't want any pre-seeded storage state. Skip the configurator-
+  // ADMIN oauth dance when asked.
+  if (process.env.PLAYWRIGHT_SKIP_SETUP === '1') {
+    fs.writeFileSync(STORAGE_PATH, JSON.stringify({ cookies: [], origins: [] }));
+    return;
+  }
+
   const { token, user } = await fetchAdminToken();
   const authBlob = buildAuthStateBlob(token, user);
 
