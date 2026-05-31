@@ -55,6 +55,10 @@ test.describe('Theme B — Configurator Employee mobile validation', () => {
     // composed validator returns a string. PASS = either unset or 'false'.
     const ariaInvalid = await mobile.getAttribute('aria-invalid');
     expect(['false', null]).toContain(ariaInvalid);
+    // Defence-in-depth: assert the Kenya help text is absent. Without this,
+    // the test would still pass if useMobileValidator stopped running
+    // entirely (no validator → no aria-invalid → trivially in [false, null]).
+    await expect(page.getByText(HELP_TEXT)).toHaveCount(0);
     await page.waitForTimeout(1_500);
   });
 

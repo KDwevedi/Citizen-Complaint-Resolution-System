@@ -1,20 +1,32 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Theme A — Citizen edit-profile avatar refreshes on save.
+ * Theme A — Citizen edit-profile avatar refreshes on save (issue #556).
  *
- * Source under test (from validation notes): the citizen profile edit page
- * in digit-ui re-mounts the avatar with a cache-busted URL after a save,
- * so the new photo is visible immediately instead of requiring a hard
- * refresh.
+ * Source under test: CitizenSideBar.js subscribes to the user profile so the
+ * sidebar avatar src refreshes when UserProfile.js writes a new value, with
+ * NO hard refresh. The assertion below is the right shape: snapshot
+ * avatar.src before, upload a file, save, and assert avatar.src changed.
  *
- * Status on ovh-cloud-dev `validate/all-themes`:
- *   This deployment does NOT have STATIC_OTP wired (the citizen OTP path
- *   is novu-backed and there is no fixture inbox). Programmatic citizen
- *   login is therefore not currently possible from a Playwright run, and
- *   we don't have an ADMIN-as-citizen shortcut on this build. Until
- *   STATIC_OTP is added (or a deterministic OTP inbox is exposed), this
- *   spec stays fixme'd.
+ * Why this is still `.fixme` on ovh-cloud-dev `validate/all-themes`:
+ *   The deployment runs the standard digit-ui citizen flow, which gates
+ *   /citizen/user/profile behind an OTP login. To exercise the avatar
+ *   refresh we need ONE of:
+ *     (a) `STATIC_OTP` env on egov-user so a known OTP unlocks any mobile,
+ *     (b) a deterministic OTP fixture inbox we can poll (none exposed), or
+ *     (c) a programmatic citizen-session injection — the citizen side uses
+ *         `Digit.SessionStorage.set("User", ...)` (digit-ui-esbuild/.../User
+ *         /index.js:77), not the configurator's `crs-auth-state` blob, so
+ *         our existing storageState does NOT cover this route.
+ *
+ *   NEXT STEPS to un-`.fixme`:
+ *     1. Enable STATIC_OTP=123456 on egov-user via host_vars + redeploy,
+ *        OR add a one-off `citizen-setup.ts` that POSTs /user/_create at
+ *        the state tenant, hits /otp/v1/_send, reads the OTP from the
+ *        user-service DB or logs, and dumps a citizen storage-state file
+ *        (parallel to global-setup.ts), and switch this spec to use it.
+ *     2. Drop a `fixtures/avatar.png` (a 1x1 PNG) under tests/playwright/.
+ *     3. Remove `.fixme` and run.
  */
 
 test.describe('Theme A — Citizen avatar refresh on profile save', () => {
@@ -22,7 +34,7 @@ test.describe('Theme A — Citizen avatar refresh on profile save', () => {
     'updates avatar img src after save without a hard refresh',
     async ({ page }) => {
       // Re-enable once STATIC_OTP (or an equivalent deterministic OTP
-      // fixture) is enabled on this deployment.
+      // fixture) is enabled on this deployment. See NEXT STEPS above.
 
       // Citizen login (digit-ui).
       await page.goto('/citizen');
@@ -43,6 +55,9 @@ test.describe('Theme A — Citizen avatar refresh on profile save', () => {
       await page.getByRole('button', { name: /save|update/i }).click();
       await page.getByText(/profile updated|saved/i).waitFor();
 
+      // The Theme A signal: src must change WITHOUT a hard reload. If
+      // CitizenSideBar's subscription regresses, `after === before` and
+      // this test flips red.
       const after = await avatar.getAttribute('src');
       expect(after).not.toBe(before);
     },
