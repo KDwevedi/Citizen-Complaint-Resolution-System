@@ -39,6 +39,16 @@ test.describe('Theme B — Configurator Complaint citizen mobile', () => {
     await mobile.pressSequentially('abc123', { delay: 180 });
     await page.waitForTimeout(1_500);
     await mobile.blur();
+    await page.waitForTimeout(1_000);
+    // ra-core's raRegex (v.phoneKE) fires on submit, not on blur. Click
+    // Create to force the validation pass — the form is intentionally
+    // incomplete (no Complaint Type / Boundary) so the submit fails
+    // server-side validation, but the client-side regex check still runs
+    // and renders the error into DigitFormInput's role="alert" slot.
+    const submit = page.getByRole('button', { name: /^Create$/i }).first();
+    if (await submit.isVisible().catch(() => false)) {
+      await submit.click({ trial: false }).catch(() => {});
+    }
     await page.waitForTimeout(2_000);
     await expect(page.getByText(HELP_TEXT).first()).toBeVisible();
     expect(await mobile.getAttribute('aria-invalid')).toBe('true');
@@ -55,10 +65,24 @@ test.describe('Theme B — Configurator Complaint citizen mobile', () => {
     await mobile.pressSequentially('0712345678', { delay: 180 });
     await page.waitForTimeout(1_500);
     await mobile.blur();
+    await page.waitForTimeout(1_000);
+    // Same submit-to-force-validation as the NEG test. Form is incomplete
+    // so the actual create fails — we only want the citizen-mobile rule
+    // to have run.
+    const submit = page.getByRole('button', { name: /^Create$/i }).first();
+    if (await submit.isVisible().catch(() => false)) {
+      await submit.click({ trial: false }).catch(() => {});
+    }
     await page.waitForTimeout(2_000);
-    // Help text must NOT appear (catches a regression where the pattern
-    // accidentally rejects the trunk-zero form).
-    await expect(page.getByText(HELP_TEXT)).toHaveCount(0);
+    // Help text must NOT appear in the error slot (catches a regression
+    // where the pattern accidentally rejects the trunk-zero form). The
+    // complaint form's mobile field doesn't pass a `help` prop with the
+    // same string (it shows "Used to identify the citizen…"), so the
+    // plain getByText for HELP_TEXT is safe here — but using role=alert
+    // is still tighter.
+    await expect(
+      page.locator('[role="alert"]').filter({ hasText: HELP_TEXT }),
+    ).toHaveCount(0);
     expect(['false', null]).toContain(await mobile.getAttribute('aria-invalid'));
     await page.waitForTimeout(1_500);
   });

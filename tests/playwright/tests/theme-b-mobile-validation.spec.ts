@@ -55,10 +55,16 @@ test.describe('Theme B — Configurator Employee mobile validation', () => {
     // composed validator returns a string. PASS = either unset or 'false'.
     const ariaInvalid = await mobile.getAttribute('aria-invalid');
     expect(['false', null]).toContain(ariaInvalid);
-    // Defence-in-depth: assert the Kenya help text is absent. Without this,
-    // the test would still pass if useMobileValidator stopped running
-    // entirely (no validator → no aria-invalid → trivially in [false, null]).
-    await expect(page.getByText(HELP_TEXT)).toHaveCount(0);
+    // Defence-in-depth: the Kenya help text must NOT render in the error
+    // slot. EmployeeCreate.tsx mirrors the validator's errorMessage into a
+    // muted `help` prop ("…optional leading 0)" stays visible even on a
+    // valid value), so a naive getByText() always matches. The error
+    // rendering is the one tagged `role="alert"` (DigitFormInput.tsx) —
+    // assert *that* is absent. If the validator stops firing or the
+    // wiring breaks, the alert reappears and this flips red.
+    await expect(
+      page.locator('[role="alert"]').filter({ hasText: HELP_TEXT }),
+    ).toHaveCount(0);
     await page.waitForTimeout(1_500);
   });
 

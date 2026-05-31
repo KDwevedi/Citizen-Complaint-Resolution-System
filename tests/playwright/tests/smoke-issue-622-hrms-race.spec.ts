@@ -19,7 +19,9 @@ import { test, expect } from '@playwright/test';
  * router renders, and no 503/error banner appears.
  */
 
-const EMPLOYEE_LANDING_URL = '/employee/';
+// digit-ui is mounted under /digit-ui/ (host nginx alias serves the static
+// bundle there; /employee/ alone is a 404). Empirical 2026-05-31.
+const EMPLOYEE_LANDING_URL = '/digit-ui/employee/';
 const ERROR_BANNERS = [
   /service unavailable/i,
   /503/,
