@@ -91,10 +91,17 @@ const TimeLine = ({ isLoading, data, serviceRequestId, complaintWorkflow, rating
   }, [timeline]);
 
   const getCommentsInCustomChildComponent = ({ comment, thumbnailsToShow, auditDetails, assigner, status }) => {
+    // Citizen-side timeline rows used to render literal "undefined" when
+    // the assigner record was missing a name/mobile (some auto-actions
+    // — most notably the auto-escalator — don't always carry both
+    // fields on the process instance). Fall back to a localized "NA" so
+    // we never leak the JS undefined-as-string to the citizen view, and
+    // we keep parity with the employee timeline's CS_NA fallback in
+    // TimeLineWrapper. CCRS#490 sub-bug 4.
     const captionDetails = {
       date: auditDetails?.lastModified,
-      name: assigner?.name,
-      mobileNumber: assigner?.mobileNumber,
+      name: assigner?.name ? assigner.name : t("CS_NA"),
+      mobileNumber: assigner?.mobileNumber ? assigner.mobileNumber : t("CS_NA"),
       source: status == "COMPLAINT_FILED" ? complaintDetails?.audit.source : ""
     }
     return <>
