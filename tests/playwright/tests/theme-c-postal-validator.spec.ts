@@ -25,19 +25,26 @@ test.describe('Theme C — Configurator Complaint pincode validation', () => {
   test('rejects malformed postal code on submit', async ({ page }) => {
     await page.goto(URL);
     await page.waitForSelector(PINCODE, { timeout: 20_000 });
+    await page.waitForTimeout(1_500);
     await fillRequired(page);
+    await page.waitForTimeout(1_500);
     await page.locator(PINCODE).fill('1234');
+    await page.waitForTimeout(1_000);
     await page.getByRole('button', { name: /^Create$/i }).click();
     await expect(page.getByText(HELP_TEXT).first()).toBeVisible({ timeout: 5_000 });
+    await page.waitForTimeout(2_500);
   });
 
   test('accepts well-formed 5-digit postal code on submit', async ({ page }) => {
     await page.goto(URL);
     await page.waitForSelector(PINCODE, { timeout: 20_000 });
+    await page.waitForTimeout(1_500);
     await fillRequired(page);
+    await page.waitForTimeout(1_500);
     await page.locator(PINCODE).fill('00100');
+    await page.waitForTimeout(1_000);
     await page.getByRole('button', { name: /^Create$/i }).click();
-    await page.waitForTimeout(2_000);
+    await page.waitForTimeout(3_500);
     await expect(page.getByText(HELP_TEXT).first()).toHaveCount(0);
   });
 });

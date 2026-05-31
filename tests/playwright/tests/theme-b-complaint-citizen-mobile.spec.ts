@@ -24,10 +24,14 @@ test.describe('Theme B — Configurator Complaint citizen mobile', () => {
   test('trunk-zero Kenya mobile passes phoneKE pattern', async ({ page }) => {
     await page.goto(COMPLAINT_CREATE_URL);
     await page.waitForSelector(CITIZEN_MOBILE, { timeout: 30_000 });
+    await page.waitForTimeout(1_500);
     const mobile = page.locator(CITIZEN_MOBILE);
     await mobile.fill('0712345678');
+    await page.waitForTimeout(1_500);
     await mobile.blur();
+    await page.waitForTimeout(1_500);
     expect(['false', null]).toContain(await mobile.getAttribute('aria-invalid'));
+    await page.waitForTimeout(1_500);
   });
 
   // Empirical 2026-05-30: on validate/all-themes with boundaries seeded and

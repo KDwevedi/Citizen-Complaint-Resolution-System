@@ -41,19 +41,32 @@ test.describe('Theme B — Configurator Employee mobile validation', () => {
   });
 
   test('valid Kenya mobile clears aria-invalid', async ({ page }) => {
+    await page.waitForTimeout(2_000);
     const mobile = page.locator(MOBILE_INPUT);
-    await mobile.fill('712345678');
+    // Type character-by-character so the recorded video shows the digits
+    // being entered rather than a single-frame paste.
+    await mobile.focus();
+    await page.waitForTimeout(800);
+    await mobile.pressSequentially('712345678', { delay: 180 });
+    await page.waitForTimeout(1_500);
     await mobile.blur();
+    await page.waitForTimeout(2_000);
     // Material-UI flips aria-invalid on the underlying input when the
     // composed validator returns a string. PASS = either unset or 'false'.
     const ariaInvalid = await mobile.getAttribute('aria-invalid');
     expect(['false', null]).toContain(ariaInvalid);
+    await page.waitForTimeout(1_500);
   });
 
   test('invalid mobile surfaces Kenya help text and aria-invalid', async ({ page }) => {
+    await page.waitForTimeout(2_000);
     const mobile = page.locator(MOBILE_INPUT);
-    await mobile.fill('9876543210');
+    await mobile.focus();
+    await page.waitForTimeout(800);
+    await mobile.pressSequentially('9876543210', { delay: 180 });
+    await page.waitForTimeout(1_500);
     await mobile.blur();
+    await page.waitForTimeout(2_000);
     // ra-core only surfaces validation errors after a submit attempt OR on
     // blur with `mode: 'onBlur'`. DigitFormInput is configured for onBlur;
     // we still trigger Create submit to be defensive — the form is
@@ -72,5 +85,6 @@ test.describe('Theme B — Configurator Employee mobile validation', () => {
     await expect(page.getByText(HELP_TEXT).first()).toBeVisible();
     const ariaInvalid = await mobile.getAttribute('aria-invalid');
     expect(ariaInvalid).toBe('true');
+    await page.waitForTimeout(2_500);
   });
 });

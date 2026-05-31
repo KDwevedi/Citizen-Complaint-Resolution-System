@@ -43,6 +43,10 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
         viewport: { width: 1366, height: 768 },
+        // slowMo paces every browser action by N ms so the recorded videos
+        // read as demos rather than blink-and-miss-it sprints. Bump higher
+        // if a viewer needs even more breathing room.
+        launchOptions: { slowMo: 600 },
       },
     },
   ],
