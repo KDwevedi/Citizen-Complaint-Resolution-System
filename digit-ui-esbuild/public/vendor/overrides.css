@@ -5973,3 +5973,18 @@ header.digit-header .digit-dropdown-master {
   line-height: 2rem;
   text-align: center;
 }
+
+/* CCRS#505 sub-3: Bomet bannerLogo cramped at 80×40. SCSS source bumped
+ * to 140px wide / max-height 64px, but vendor/digit-ui-css.css is
+ * pre-compiled and committed (packages/css gulp build isn't run on deploy),
+ * so the SCSS change is dead weight. Override in overrides.css which
+ * loads AFTER vendor — this routes through the cascade and lights up
+ * the bomet login banner + employee topbar header without a CSS rebuild. */
+.banner .bannerLogo,
+.bannerHeader .bannerLogo {
+  width: 140px !important;
+  height: auto !important;
+  max-height: 64px !important;
+  padding-right: 0 !important;
+  margin-right: 0 !important;
+}
