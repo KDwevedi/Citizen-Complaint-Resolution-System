@@ -5981,7 +5981,11 @@ header.digit-header .digit-dropdown-master {
  * loads AFTER vendor — this routes through the cascade and lights up
  * the bomet login banner + employee topbar header without a CSS rebuild. */
 .banner .bannerLogo,
-.bannerHeader .bannerLogo {
+.bannerHeader .bannerLogo,
+/* Override Chakshu's v2 keycloak login layout that locks bannerLogo at
+ * 56×56 — that's the size #505 calls out as too small. Match selector
+ * specificity (3 classes) so the !important wins the cascade. */
+.v2-employee-login-top-logos .bannerHeader .bannerLogo {
   width: 140px !important;
   height: auto !important;
   max-height: 64px !important;
