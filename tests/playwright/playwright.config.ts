@@ -23,7 +23,13 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     viewport: { width: 1366, height: 768 },
-    video: 'on',
+    // Default video captures at 800x450 and downsamples — explicit size
+    // matching the viewport gives full-resolution recordings of the
+    // actual page content.
+    video: {
+      mode: 'on',
+      size: { width: 1366, height: 768 },
+    },
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
     actionTimeout: 10_000,
@@ -34,7 +40,10 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1366, height: 768 },
+      },
     },
   ],
 });
