@@ -5984,11 +5984,14 @@ header.digit-header .digit-dropdown-master {
 .bannerHeader .bannerLogo,
 /* Override Chakshu's v2 keycloak login layout that locks bannerLogo at
  * 56×56 — that's the size #505 calls out as too small. Match selector
- * specificity (3 classes) so the !important wins the cascade. */
+ * specificity (3 classes) so the !important wins the cascade.
+ * Use height (not max-height) so square logos render at the full size
+ * rather than collapsing to 64×64 inside a 140-wide contain box. */
 .v2-employee-login-top-logos .bannerHeader .bannerLogo {
-  width: 140px !important;
-  height: auto !important;
-  max-height: 64px !important;
+  height: 96px !important;
+  max-height: 96px !important;
+  width: auto !important;
+  max-width: 160px !important;
   padding-right: 0 !important;
   margin-right: 0 !important;
 }
