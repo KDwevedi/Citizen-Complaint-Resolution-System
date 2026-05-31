@@ -316,7 +316,13 @@ server {
     return 302 /digit-ui/;
   }
   location /digit-ui/ {
-    alias /opt/digit-ui-esbuild/build/;
+    # When `build_digit_ui: true` the playbook builds /opt/ccrs/digit-ui-esbuild
+    # (the vendored copy in this CCRS tree) and lays into the digit-ui container,
+    # but the host nginx historically aliased a SEPARATE clone at
+    # /opt/digit-ui-esbuild that drifts. Default to the vendored build so
+    # `build_digit_ui:true` is end-to-end visible; tenants that pin a separate
+    # clone can override `digit_ui_serve_dir`.
+    alias {{ digit_ui_serve_dir | default('/opt/ccrs/digit-ui-esbuild/build') }}/;
     try_files $uri $uri/ /digit-ui/index.html;
     sub_filter_once on;
     sub_filter_types text/html;
