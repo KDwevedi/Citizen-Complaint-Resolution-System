@@ -116,11 +116,11 @@
     min-width: 400px;
   }
   .bannerLogo {
-    width: 80px;
-    height: 40px;
+    // Match bannerV2.scss — larger logo for legibility (#505 sub-3).
+    width: 140px;
+    height: auto;
+    max-height: 64px;
     object-fit: contain;
-    padding-right: 10px;
-    margin-right: 10px;
     border-right: none !important;
   }
   .bannerHeader {
