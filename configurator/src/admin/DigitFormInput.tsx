@@ -1,7 +1,28 @@
 // React is used implicitly for JSX transform
-import { useInput, type InputProps } from 'ra-core';
+import { useInput, useTranslate, type InputProps } from 'ra-core';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+
+/**
+ * ra-core's regex/email/etc. validators serialize their error messages as
+ * `@@react-admin@@{"message":"...","args":{...}}` so the i18nProvider can
+ * pick them up at render time. When the consumer reads `fieldState.error
+ * .message` directly the envelope leaks into the DOM (visible in any
+ * Playwright frame as `@@react-admin@@{...}`). Unwrap here so the user-
+ * facing copy is the plain string the validator was constructed with.
+ */
+function unwrapRaError(raw: unknown, translate: (k: string, opts?: Record<string, unknown>) => string): string {
+  if (typeof raw !== 'string') return '';
+  if (raw.startsWith('@@react-admin@@')) {
+    try {
+      const parsed = JSON.parse(raw.slice('@@react-admin@@'.length)) as { message?: string; args?: Record<string, unknown> };
+      if (parsed?.message) return translate(parsed.message, { _: parsed.message, ...(parsed.args ?? {}) });
+    } catch {
+      // fall through to raw
+    }
+  }
+  return translate(raw, { _: raw });
+}
 
 export interface DigitFormInputProps extends InputProps {
   /** Display label for the input */
@@ -38,9 +59,10 @@ export function DigitFormInput({
     fieldState,
     isRequired,
   } = useInput(parseProps);
+  const translate = useTranslate();
 
   const hasError = fieldState.invalid && fieldState.isTouched;
-  const errorMessage = fieldState.error?.message;
+  const errorMessage = unwrapRaError(fieldState.error?.message, translate);
 
   return (
     <div className={className}>
