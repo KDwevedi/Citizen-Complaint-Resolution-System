@@ -2107,7 +2107,7 @@ services:
     # Published unscoped (not under egovio/) at registry.preview because
     # it predates the namespace standardisation. Pin to :dev for now;
     # bump when a versioned tag is published.
-    image: registry.preview.egov.theflywheel.in/token-exchange-svc:dev
+    image: registry.preview.egov.theflywheel.in/token-exchange-svc:keycloak-deploy
     container_name: token-exchange-svc
     restart: unless-stopped
     profiles: ["keycloak"]
@@ -2122,6 +2122,18 @@ services:
       PORT: '3000'
       KEYCLOAK_ISSUER: http://keycloak:8180/realms/${TOKEN_EXCHANGE_SYSTEM_TENANT}
       KEYCLOAK_JWKS_URI: http://keycloak:8180/realms/${TOKEN_EXCHANGE_SYSTEM_TENANT}/protocol/openid-connect/certs
+      # KEYCLOAK_ADMIN_URL: base used by the overlay both for admin REST
+      # (/admin/realms/*) AND for the password-grant token endpoint it
+      # forwards to. Defaults to localhost:8180 which breaks inside the
+      # compose network — pin to the in-network service name.
+      KEYCLOAK_ADMIN_URL: http://keycloak:8180
+      KEYCLOAK_USER_REALM: ${TOKEN_EXCHANGE_SYSTEM_TENANT}
+      # Overlay's KC admin creds default to admin/admin. The real KC
+      # admin password is the strong value from OpenBao (which is also
+      # what the keycloak container itself was created with). Reuse the
+      # same .env variable so the overlay's admin client stays in sync.
+      KEYCLOAK_ADMIN_USERNAME: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:-admin}
       # Route through egov-user-proxy on port 8107 (where every other
       # DIGIT service reaches egov-user from — see kong.yml). The proxy
       # is on the egov-network too, listens on 8107, and forwards to
