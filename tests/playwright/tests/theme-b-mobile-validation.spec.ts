@@ -97,4 +97,33 @@ test.describe('Theme B — Configurator Employee mobile validation', () => {
     expect(ariaInvalid).toBe('true');
     await page.waitForTimeout(2_500);
   });
+
+  test('valid trunk-zero Kenya mobile (0712345678) clears aria-invalid — #447 + #674', async ({
+    page,
+  }) => {
+    // The everyday Kenyan writing form: 0712345678 (10 chars with the
+    // trunk-0). The configurator's fallback validator was hardened in
+    // PR #674 to accept this form by stripping the leading zero before
+    // checking the [17]\d{8} pattern. Without this drive, a regression
+    // of #674 stays green because the other two tests only exercise
+    // the bare 9-digit form and the digits-but-wrong-prefix form.
+    await page.waitForTimeout(2_000);
+    const mobile = page.locator(MOBILE_INPUT);
+    await mobile.focus();
+    await page.waitForTimeout(800);
+    await mobile.pressSequentially('0712345678', { delay: 180 });
+    await page.waitForTimeout(1_500);
+    await mobile.blur();
+    await page.waitForTimeout(2_000);
+
+    const ariaInvalid = await mobile.getAttribute('aria-invalid');
+    expect(
+      ['false', null],
+      `0712345678 (trunk-zero KE form) must clear aria-invalid; got "${ariaInvalid}". Regression of #674 trunk-zero acceptance.`,
+    ).toContain(ariaInvalid);
+    await expect(
+      page.locator('[role="alert"]').filter({ hasText: HELP_TEXT }),
+    ).toHaveCount(0);
+    await page.waitForTimeout(1_500);
+  });
 });

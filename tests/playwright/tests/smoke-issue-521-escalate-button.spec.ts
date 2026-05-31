@@ -41,6 +41,16 @@ test.describe('Smoke #521 — Escalate wiring', () => {
       await page.waitForLoadState('domcontentloaded');
       await page.waitForTimeout(3_500);
 
+      // The first row navigates to the VIEW page (/manage/complaints/<id>).
+      // The Workflow section + WorkflowActionSelect live on the EDIT
+      // page; click Edit to surface them.
+      const editBtn = page.getByRole('button', { name: /^Edit$/ }).first();
+      if (await editBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await editBtn.click();
+        await page.waitForLoadState('domcontentloaded');
+        await page.waitForTimeout(3_000);
+      }
+
       // ComplaintEdit renders a <FieldSection title="Workflow"> with the
       // WorkflowActionSelect inside. The combobox trigger is rendered by
       // Radix. Either is fine to assert against.
