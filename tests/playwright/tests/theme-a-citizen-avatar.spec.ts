@@ -19,47 +19,84 @@ import { test, expect } from '@playwright/test';
  *         /index.js:77), not the configurator's `crs-auth-state` blob, so
  *         our existing storageState does NOT cover this route.
  *
- *   NEXT STEPS to un-`.fixme`:
- *     1. Enable STATIC_OTP=123456 on egov-user via host_vars + redeploy,
- *        OR add a one-off `citizen-setup.ts` that POSTs /user/_create at
- *        the state tenant, hits /otp/v1/_send, reads the OTP from the
- *        user-service DB or logs, and dumps a citizen storage-state file
- *        (parallel to global-setup.ts), and switch this spec to use it.
- *     2. Drop a `fixtures/avatar.png` (a 1x1 PNG) under tests/playwright/.
- *     3. Remove `.fixme` and run.
+ *   STATUS 2026-06-01: STATIC_OTP=123456 IS enabled on bomet AND the
+ *   fixture exists. But the sub-agent investigation on 2026-05-31
+ *   showed the live citizen sidebar on bomet is the v2 component
+ *   (`digit-ui-components-v2/citizen-sidebar.tsx`) which has zero
+ *   photo handling — there's never an <img> in the sidebar for the
+ *   src-changed assertion to discriminate against. The legacy
+ *   CitizenSideBar.Profile fix (commit 52296df7) only powers the
+ *   mobile drawer.
+ *
+ *   The spec stays `.fixme` until the v2 sidebar gets the photo port
+ *   (follow-up comment on #556 with the minimal port plan). Once that
+ *   ships, drop `.fixme` and the spec drives the post-save img.src
+ *   delta as designed.
  */
+
+const CITIZEN_LOGIN_URL = '/digit-ui/citizen/login';
+const CITIZEN_PROFILE_URL = '/digit-ui/citizen/user/profile';
+const STATIC_OTP = '123456';
 
 test.describe('Theme A — Citizen avatar refresh on profile save', () => {
   test.fixme(
-    'updates avatar img src after save without a hard refresh',
+    'updates avatar img src after save without a hard refresh (#556 v2 port)',
     async ({ page }) => {
-      // Re-enable once STATIC_OTP (or an equivalent deterministic OTP
-      // fixture) is enabled on this deployment. See NEXT STEPS above.
+      // Citizen OTP login (digit-ui). STATIC_OTP is enabled on bomet.
+      await page.goto(`${CITIZEN_LOGIN_URL}?cb=${Date.now()}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForTimeout(2_000);
 
-      // Citizen login (digit-ui).
-      await page.goto('/citizen');
-      await page.getByLabel(/mobile/i).fill('9999999999');
-      await page.getByRole('button', { name: /get otp|continue/i }).click();
-      await page.getByLabel(/otp/i).fill('123456');
-      await page.getByRole('button', { name: /verify|login/i }).click();
+      await page
+        .locator('input[type="tel"], input[type="number"]')
+        .first()
+        .pressSequentially('712345099', { delay: 80 });
+      await page.getByRole('button', { name: /get otp|continue/i }).first().click();
+      await page.waitForTimeout(2_000);
+      const otpDigits = page.locator('input[autocomplete="one-time-code" i], input[maxlength="1"]');
+      const otpCount = await otpDigits.count();
+      if (otpCount >= 6) {
+        for (let i = 0; i < 6; i++) await otpDigits.nth(i).fill(STATIC_OTP[i]);
+      } else {
+        await page.getByRole('textbox').first().fill(STATIC_OTP);
+      }
+      await page.getByRole('button', { name: /verify|login|continue/i }).first().click();
+      await page.waitForURL(/\/digit-ui\/citizen(?!\/login)/, { timeout: 25_000 });
 
       // Edit Profile.
-      await page.goto('/citizen/user/profile');
-      const avatar = page.locator('img[alt*="profile" i], img[data-testid="profile-pic"]').first();
-      const before = await avatar.getAttribute('src');
+      await page.goto(`${CITIZEN_PROFILE_URL}?cb=${Date.now()}`);
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForTimeout(3_000);
 
-      // Upload a new image. Fixture is a 1×1 PNG checked in next to this
-      // spec under fixtures/avatar.png — write it before re-enabling.
-      const fileInput = page.locator('input[type="file"]').first();
-      await fileInput.setInputFiles('tests/fixtures/avatar.png');
-      await page.getByRole('button', { name: /save|update/i }).click();
-      await page.getByText(/profile updated|saved/i).waitFor();
+      // Snapshot the sidebar avatar img before the upload.
+      const sidebarAvatar = page
+        .locator('aside img, [class*="sidebar" i] img, [class*="SideBar" i] img, [class*="v2-citizen-sidebar" i] img')
+        .first();
+      const before = await sidebarAvatar.getAttribute('src').catch(() => null);
 
-      // The Theme A signal: src must change WITHOUT a hard reload. If
-      // CitizenSideBar's subscription regresses, `after === before` and
-      // this test flips red.
-      const after = await avatar.getAttribute('src');
-      expect(after).not.toBe(before);
+      // Upload via the "Change photo" file chooser.
+      const fileChooserPromise = page.waitForEvent('filechooser', { timeout: 8_000 });
+      await page.getByRole('button', { name: /change photo/i }).click();
+      const fileChooser = await fileChooserPromise;
+      await fileChooser.setFiles('tests/playwright/fixtures/avatar.png');
+      await page.waitForTimeout(1_500);
+
+      // Save.
+      await page.getByRole('button', { name: /^save$|update profile|^update$/i }).first().click();
+      await page
+        .waitForResponse(
+          (r) => /\/user\/profile\/_update|\/user\/users\/_update/.test(r.url()) && r.status() < 500,
+          { timeout: 15_000 },
+        )
+        .catch(() => null);
+      await page.waitForTimeout(3_000);
+
+      // The #556 v2-port closure signal: sidebar img.src changes without a
+      // hard reload. Pre-port: this assertion fails because the v2 sidebar
+      // renders an initial-letter Avatar (no <img> at all). Post-port:
+      // <img> with the filestore URL appears.
+      const after = await sidebarAvatar.getAttribute('src').catch(() => null);
+      expect(after, 'sidebar avatar src must change after profile save').not.toBe(before);
     },
   );
 });

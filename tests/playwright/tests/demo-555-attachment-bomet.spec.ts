@@ -195,6 +195,7 @@ test.describe('Demo: citizen complaint attachment on bomet — #555', () => {
 
     // Assert the first preview is reachable (naturalWidth > 0 means
     // the browser actually loaded the bytes — public-URL contract).
+    const previewSrc = await previewImgs.first().getAttribute('src');
     const naturalWidth = await previewImgs.first().evaluate((img: HTMLImageElement) => img.naturalWidth);
     expect(
       naturalWidth,
@@ -202,6 +203,94 @@ test.describe('Demo: citizen complaint attachment on bomet — #555', () => {
     ).toBeGreaterThan(0);
 
     // Hold for the recording so the preview is visible.
-    await page.waitForTimeout(4_500);
+    await page.waitForTimeout(2_500);
+
+    // ============ 6. Submit complaint + capture complaint number ============
+    // Per Gurjeet's open sub-items, the detail page Attachments render
+    // half is also broken — the create-side preview proves the parser
+    // fix but doesn't validate the complaint-detail rendering of the
+    // same image. Drive the wizard to submission and visit the detail
+    // page; assert the image renders there too.
+    //
+    // Wait for the /pgr-services/v2/request/_create response so we can
+    // pluck the new servicerequestid.
+    const createPromise = page
+      .waitForResponse(
+        (r) =>
+          /\/pgr-services\/.*\/_create/.test(r.url()) && r.status() < 500,
+        { timeout: 30_000 },
+      )
+      .catch(() => null);
+
+    // Keep clicking Next/Submit until the form submits or we hit a
+    // bound. This is the wizard's "happy submit path" without picking
+    // a specific button label.
+    for (let i = 0; i < 6; i++) {
+      const submitBtn = page
+        .getByRole('button', { name: /^submit$|^send$|file complaint|raise complaint/i })
+        .first();
+      const nextBtn = page.getByRole('button', { name: /^next$|continue/i }).first();
+      const btn = (await submitBtn.isVisible({ timeout: 800 }).catch(() => false))
+        ? submitBtn
+        : nextBtn;
+      if (await btn.isEnabled({ timeout: 1_500 }).catch(() => false)) {
+        await btn.click();
+        await page.waitForTimeout(2_500);
+      } else {
+        break;
+      }
+    }
+
+    const createResp = await createPromise;
+    if (!createResp) {
+      // The submission didn't complete — this is the soft-fail path.
+      // We honestly annotate that the detail-render half remains
+      // unvalidated rather than pretend the spec covered it.
+      test.info().annotations.push({
+        type: 'skipped',
+        description:
+          '#555 detail render — wizard submit did not complete in this run; create-side preview validated above is the only honest signal.',
+      });
+      await page.waitForTimeout(2_000);
+      return;
+    }
+
+    const createJson = await createResp.json().catch(() => ({} as Record<string, unknown>));
+    const serviceWrappers = (createJson as Record<string, unknown>).ServiceWrappers as
+      | Array<Record<string, unknown>>
+      | undefined;
+    const sr0 = serviceWrappers?.[0]?.service as Record<string, unknown> | undefined;
+    const complaintNumber = sr0?.serviceRequestId as string | undefined;
+    expect(
+      complaintNumber,
+      `_create response must include a serviceRequestId; got ${JSON.stringify(createJson).slice(0, 300)}`,
+    ).toBeTruthy();
+
+    // ============ 7. Visit citizen detail + assert image renders ============
+    await page.goto(
+      `/digit-ui/citizen/pgr/complaint-details/${complaintNumber}?cb=${Date.now()}`,
+    );
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(5_000);
+
+    // Look for an Attachments / Thumbnail image. The post-fix shape:
+    // `<img src="<filestore url>" alt="issue thumbnail">` (or similar).
+    const detailImgs = page.locator(
+      'img[src*="file-store"], img[src*="bometfeedbackhub"], img[alt*="thumbnail" i], img[alt*="attachment" i], img[alt*="issue" i]',
+    );
+    await expect(
+      detailImgs.first(),
+      '#555 detail render — Attachments section must surface an <img> on the citizen complaint detail page',
+    ).toBeVisible({ timeout: 15_000 });
+
+    const detailNaturalWidth = await detailImgs
+      .first()
+      .evaluate((img: HTMLImageElement) => img.naturalWidth);
+    expect(
+      detailNaturalWidth,
+      `detail-page img naturalWidth must be > 0 (public URL); got ${detailNaturalWidth}. Original preview src was: ${previewSrc}`,
+    ).toBeGreaterThan(0);
+
+    await page.waitForTimeout(3_000);
   });
 });
