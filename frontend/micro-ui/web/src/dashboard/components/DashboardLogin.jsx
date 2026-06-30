@@ -28,8 +28,9 @@ import {
 const OAUTH_BASIC = "Basic ZWdvdi11c2VyLWNsaWVudDo=";
 
 const DEMO_USERS = [
-  { label: "Supervisor", username: "DEMO_SUPERVISOR", hint: "sees officer-level KPIs" },
-  { label: "GRO", username: "DEMO_GRO", hint: "officer-level KPIs hidden" },
+  { label: "Supervisor", username: "DEMO_SUPERVISOR", hint: "all departments" },
+  { label: "Water officer", username: "DEMO_WATER", hint: "Water dept only" },
+  { label: "Health officer", username: "DEMO_HEALTH", hint: "Medical dept only" },
 ];
 
 /** Order roles so the first non-EMPLOYEE role leads (drives the scoping badge). */

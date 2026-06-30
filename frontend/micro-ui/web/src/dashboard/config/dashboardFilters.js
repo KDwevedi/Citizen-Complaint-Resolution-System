@@ -53,14 +53,17 @@ export function persistDashboardFilters(filters, dynamicOptions) {
 export function reconcileFiltersWithOptions(filters, filterOptions) {
   if (!filterOptions) return filters;
 
-  const next = sanitizeFilters(filters, filterOptions);
+  // filters can be momentarily null (e.g. a rapid external date-input change racing
+  // the options effect); fall back to defaults so we never read .geography off null.
+  const safe = filters ?? buildDefaultFilters();
+  const next = sanitizeFilters(safe, filterOptions);
   const changed =
-    next.geography !== filters.geography ||
-    next.complaintType !== filters.complaintType ||
-    next.dateFrom !== filters.dateFrom ||
-    next.dateTo !== filters.dateTo;
+    next.geography !== safe.geography ||
+    next.complaintType !== safe.complaintType ||
+    next.dateFrom !== safe.dateFrom ||
+    next.dateTo !== safe.dateTo;
 
-  return changed ? next : filters;
+  return changed ? next : safe;
 }
 
 export function resolveSubMetricId(metric, globalFilters) {
