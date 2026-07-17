@@ -390,6 +390,11 @@ export const DASHBOARD_L10N_MESSAGES: { code: string; message: string; module: s
     "module": "rainmaker-dashboard"
   },
   {
+    "code": "DASHBOARD_GROUPBY_CHIP",
+    "message": "Group",
+    "module": "rainmaker-dashboard"
+  },
+  {
     "code": "DASHBOARD_GROUPBY_LABEL",
     "message": "Group by",
     "module": "rainmaker-dashboard"
@@ -1200,11 +1205,6 @@ export const DASHBOARD_L10N_MESSAGES: { code: string; message: string; module: s
     "module": "rainmaker-dashboard"
   },
   {
-    "code": "DASHBOARD_TYPE_FILTER_UP",
-    "message": "Up one level",
-    "module": "rainmaker-dashboard"
-  },
-  {
     "code": "DASHBOARD_UNIT_D",
     "message": "d",
     "module": "rainmaker-dashboard"
@@ -1976,6 +1976,11 @@ export const DASHBOARD_L10N_MESSAGES_PT_PT: { code: string; message: string; mod
   {
     "code": "DASHBOARD_GEO_LEVEL_3",
     "message": "Reclamações",
+    "module": "rainmaker-dashboard"
+  },
+  {
+    "code": "DASHBOARD_GROUPBY_CHIP",
+    "message": "Agrupar",
     "module": "rainmaker-dashboard"
   },
   {
@@ -2786,11 +2791,6 @@ export const DASHBOARD_L10N_MESSAGES_PT_PT: { code: string; message: string; mod
   {
     "code": "DASHBOARD_TYPE_FILTER_NOT_APPLIED",
     "message": "Filtro de tipo não aplicado",
-    "module": "rainmaker-dashboard"
-  },
-  {
-    "code": "DASHBOARD_TYPE_FILTER_UP",
-    "message": "Subir um nível",
     "module": "rainmaker-dashboard"
   },
   {
