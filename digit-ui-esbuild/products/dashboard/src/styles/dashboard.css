@@ -1417,7 +1417,7 @@
 }
 
 /* Stacked (mobile) filter bar: the chip stretches full-width, exactly
-     like .dashboard-filter-inline-select in the 639px block below. */
+     like .dashboard-filter-inline-select in the 639px block above. */
 
 @media (max-width: 639px) {
   .dashboard-popover-chip {
