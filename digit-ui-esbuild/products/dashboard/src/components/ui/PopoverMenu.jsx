@@ -3,18 +3,29 @@ import { createPortal } from "react-dom";
 
 /**
  * Shared styled popover/menu primitive for the dashboard's compact controls
- * (the complaint-type tree filter in the filter bar, the per-widget "Group by"
- * chip) — the design-pass replacement for the browser-native <select>s.
+ * (the complaint-type tree filter in the filter bar, the per-widget settings
+ * gear's "Group by" menu) — the design-pass replacement for the
+ * browser-native <select>s.
  *
  * Anatomy:
  *   - anchor CHIP: a real <button> styled like the inline filter controls
  *     (.dashboard-popover-chip — same h-7/rounded-sm/border-border/bg-surface
  *     language as .dashboard-filter-inline-select), with aria-haspopup/
- *     aria-expanded and a caret;
+ *     aria-expanded and a caret; OR, when `icon` is passed, an ICON-ONLY
+ *     anchor (.dashboard-popover-iconbtn — the muted 1.5rem-square idiom of
+ *     .dashboard-widget-remove-btn) for widget-header placement, where a
+ *     text chip would make headers with options look different from headers
+ *     without;
  *   - PANEL: a fixed-position, body-portaled surface mirroring
  *     .dashboard-add-kpi-panel (border-border, 6px radius, the same soft
  *     shadow), position-synced on scroll/resize, flipped above the anchor
- *     when the viewport below is too short, clamped horizontally.
+ *     when the viewport below is too short, clamped horizontally. Because
+ *     the portal target (document.body) sits OUTSIDE .dashboard-root — the
+ *     element every dashboard design token (--border/--muted/--ring/…) and
+ *     the Inter font stack hang off — the panel carries the dashboard-root
+ *     class itself, so its contents resolve the exact same tokens as
+ *     in-tree dashboard chrome instead of inheriting the host app's
+ *     body-level styling.
  *
  * Behavior owned here so consumers stay declarative:
  *   - open/close state, click-outside close, Escape/Tab close (refocusing the
@@ -144,10 +155,9 @@ export const PopoverMenuGroupLabel = ({ children }) => (
 
 const PopoverMenu = ({
   chip,
-  chipPrefix,
   chipTitle,
   ariaLabel,
-  compact = false,
+  icon = null,
   disabled = false,
   align = "start",
   panelWidth = 240,
@@ -288,17 +298,18 @@ const PopoverMenu = ({
         aria-expanded={open}
         aria-label={ariaLabel}
         title={chipTitle}
-        className={`dashboard-popover-chip${compact ? " dashboard-popover-chip--compact" : ""}${
+        className={`${icon ? "dashboard-popover-iconbtn" : "dashboard-popover-chip"}${
           chipClassName ? ` ${chipClassName}` : ""
         }`}
         onClick={() => (open ? close() : setOpen(true))}
         onKeyDown={handleAnchorKeyDown}
       >
-        {chipPrefix != null && (
-          <span className="dashboard-popover-chip-prefix">{chipPrefix}</span>
+        {icon ?? (
+          <>
+            <span className="dashboard-popover-chip-value">{chip}</span>
+            <CaretIcon />
+          </>
         )}
-        <span className="dashboard-popover-chip-value">{chip}</span>
-        <CaretIcon />
       </button>
       {open && canPortal
         ? createPortal(
@@ -306,7 +317,7 @@ const PopoverMenu = ({
               ref={panelRef}
               role="menu"
               aria-label={ariaLabel}
-              className={`dashboard-popover-panel${panelClassName ? ` ${panelClassName}` : ""}`}
+              className={`dashboard-root dashboard-popover-panel${panelClassName ? ` ${panelClassName}` : ""}`}
               style={{
                 position: "fixed",
                 top: pos?.top ?? -9999,

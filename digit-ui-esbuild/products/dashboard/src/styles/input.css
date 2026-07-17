@@ -637,17 +637,16 @@
 
   /* ── Shared popover/menu primitive (chip anchor + portaled panel) ───── */
 
-  /* Anchor chip: the inline filter-control language (h-7 / rounded-sm /
-     border-border / bg-surface / 12px), as a real button. */
+  /* Anchor chip: a strict visual PEER of .dashboard-filter-inline-select —
+     same h-7 / min-w-[7.5rem] / rounded-sm / border-border / bg-surface /
+     12px metrics, no resting hover treatment (the select has none), the
+     select's focus treatment (border-foreground + 15% ring); the only
+     divergence is aria-expanded reusing the focus border while open. */
   .dashboard-popover-chip {
-    @apply tw-box-border tw-m-0 tw-inline-flex tw-h-7 tw-min-w-0 tw-max-w-full tw-shrink tw-cursor-pointer tw-select-none tw-items-center tw-gap-1.5 tw-self-center tw-whitespace-nowrap tw-rounded-sm tw-border tw-border-border tw-bg-surface tw-py-0 tw-px-2 tw-text-[12px] tw-leading-none tw-text-foreground;
+    @apply tw-box-border tw-m-0 tw-inline-flex tw-h-7 tw-min-w-[7.5rem] tw-max-w-full tw-shrink tw-cursor-pointer tw-select-none tw-items-center tw-gap-1.5 tw-self-center tw-whitespace-nowrap tw-rounded-sm tw-border tw-border-border tw-bg-surface tw-py-0 tw-px-2 tw-text-[12px] tw-leading-none tw-text-foreground;
     font-family: inherit;
     -webkit-appearance: none;
     appearance: none;
-  }
-
-  .dashboard-popover-chip:hover:not(:disabled) {
-    @apply tw-border-foreground;
   }
 
   .dashboard-popover-chip:focus {
@@ -667,21 +666,39 @@
     cursor: default;
   }
 
-  /* Compact variant for widget-header placement (the "Group by" chip). */
-  .dashboard-popover-chip--compact {
-    @apply tw-h-6 tw-gap-1 tw-px-1.5 tw-text-[11px];
+  /* Icon-only anchor for widget-header placement (per-widget settings
+     gear): the .dashboard-widget-remove-btn idiom — 1.5rem square, muted,
+     transparent resting, bg-muted on hover/open — minus the absolute
+     positioning (this one sits in the title-row flex flow). */
+  .dashboard-popover-iconbtn {
+    @apply tw-box-border tw-m-0 tw-inline-flex tw-h-6 tw-w-6 tw-shrink-0 tw-cursor-pointer tw-items-center tw-justify-center tw-rounded-sm tw-border-0 tw-bg-transparent tw-p-0 tw-text-muted-foreground;
+    font: inherit;
+    -webkit-appearance: none;
+    appearance: none;
   }
 
-  .dashboard-popover-chip-prefix {
-    @apply tw-shrink-0 tw-text-muted-foreground;
+  .dashboard-popover-iconbtn:hover:not(:disabled),
+  .dashboard-popover-iconbtn[aria-expanded="true"] {
+    @apply tw-bg-muted tw-text-foreground;
+  }
+
+  .dashboard-popover-iconbtn:focus {
+    @apply tw-outline-none;
+  }
+
+  .dashboard-popover-iconbtn:focus-visible {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 30%, transparent);
   }
 
   .dashboard-popover-chip-value {
-    @apply tw-inline-flex tw-min-w-0 tw-items-center tw-overflow-hidden tw-font-medium;
+    @apply tw-inline-flex tw-min-w-0 tw-items-center tw-overflow-hidden tw-font-normal;
   }
 
+  /* ml-auto pins the caret to the chip's right edge (px-2, like the
+     select-wrap's ::after caret at right: 0.5rem) when the label is
+     shorter than the shared 7.5rem min width. */
   .dashboard-popover-chip-caret {
-    @apply tw-shrink-0 tw-text-muted-foreground;
+    @apply tw-ml-auto tw-shrink-0 tw-text-muted-foreground;
   }
 
   /* Chip content for hierarchical selections: "… › Parent › Node" — each
@@ -803,8 +820,11 @@
     @apply tw-inline-flex tw-shrink-0 tw-items-center tw-text-muted-foreground;
   }
 
+  /* currentColor, not --primary: selection reads as weight + check in the
+     row's own neutral foreground — the filter bar has no brand accent and
+     the menus don't introduce one. */
   .dashboard-menu-item-check {
-    color: var(--primary, #1a1917);
+    color: currentColor;
   }
 
   /* Non-interactive section label between runs of related items (the flat
@@ -813,11 +833,20 @@
     @apply tw-px-2 tw-pb-1 tw-pt-2 tw-text-[10px] tw-font-normal tw-uppercase tw-tracking-wider tw-text-muted-foreground;
   }
 
-  /* Widget-header wrapper for the compact "Group by" chip: right-aligned in
-     the title row, shrinkable (the chip value truncates) so it never wraps
-     narrow widgets; mr-6 clears the hover remove button. */
-  .dashboard-groupby-chip-wrap {
-    @apply tw-ml-2 tw-mr-6 tw-inline-flex tw-min-w-0 tw-shrink tw-items-center tw-self-center;
+  /* Widget-header wrapper for the per-widget settings gear: right-aligned
+     in the title row (same slot on every header that has options; absent
+     otherwise); mr-6 clears the absolute remove button. */
+  .dashboard-widget-settings-wrap {
+    @apply tw-ml-2 tw-mr-6 tw-inline-flex tw-shrink-0 tw-items-center tw-self-center;
+  }
+
+  /* Stacked (mobile) filter bar: the chip stretches full-width, exactly
+     like .dashboard-filter-inline-select in the 639px block above. */
+  @media (max-width: 639px) {
+    .dashboard-popover-chip {
+      width: 100%;
+      min-width: 0;
+    }
   }
 
   /* ── Responsive layout ─────────────────────────────────────────────── */

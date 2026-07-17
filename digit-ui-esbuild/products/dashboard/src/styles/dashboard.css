@@ -1044,15 +1044,18 @@
 
 /* ── Shared popover/menu primitive (chip anchor + portaled panel) ───── */
 
-/* Anchor chip: the inline filter-control language (h-7 / rounded-sm /
-     border-border / bg-surface / 12px), as a real button. */
+/* Anchor chip: a strict visual PEER of .dashboard-filter-inline-select —
+     same h-7 / min-w-[7.5rem] / rounded-sm / border-border / bg-surface /
+     12px metrics, no resting hover treatment (the select has none), the
+     select's focus treatment (border-foreground + 15% ring); the only
+     divergence is aria-expanded reusing the focus border while open. */
 
 .dashboard-popover-chip{
   margin: 0px;
   box-sizing: border-box;
   display: inline-flex;
   height: 1.75rem;
-  min-width: 0px;
+  min-width: 7.5rem;
   max-width: 100%;
   flex-shrink: 1;
   cursor: pointer;
@@ -1080,10 +1083,6 @@
        appearance: none;
 }
 
-.dashboard-popover-chip:hover:not(:disabled){
-  border-color: var(--foreground);
-}
-
 .dashboard-popover-chip:focus{
   border-color: var(--foreground);
   outline: 2px solid transparent;
@@ -1103,19 +1102,45 @@
   cursor: default;
 }
 
-/* Compact variant for widget-header placement (the "Group by" chip). */
+/* Icon-only anchor for widget-header placement (per-widget settings
+     gear): the .dashboard-widget-remove-btn idiom — 1.5rem square, muted,
+     transparent resting, bg-muted on hover/open — minus the absolute
+     positioning (this one sits in the title-row flex flow). */
 
-.dashboard-popover-chip--compact{
+.dashboard-popover-iconbtn{
+  margin: 0px;
+  box-sizing: border-box;
+  display: inline-flex;
   height: 1.5rem;
-  gap: 0.25rem;
-  padding-left: 0.375rem;
-  padding-right: 0.375rem;
-  font-size: 11px;
+  width: 1.5rem;
+  flex-shrink: 0;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  border-width: 0px;
+  background-color: transparent;
+  padding: 0px;
+  color: var(--muted-foreground);
+  font: inherit;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+       appearance: none;
 }
 
-.dashboard-popover-chip-prefix{
-  flex-shrink: 0;
-  color: var(--muted-foreground);
+.dashboard-popover-iconbtn:hover:not(:disabled),
+  .dashboard-popover-iconbtn[aria-expanded="true"]{
+  background-color: var(--muted);
+  color: var(--foreground);
+}
+
+.dashboard-popover-iconbtn:focus{
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.dashboard-popover-iconbtn:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring) 30%, transparent);
 }
 
 .dashboard-popover-chip-value{
@@ -1123,10 +1148,15 @@
   min-width: 0px;
   align-items: center;
   overflow: hidden;
-  font-weight: 500;
+  font-weight: 400;
 }
 
+/* ml-auto pins the caret to the chip's right edge (px-2, like the
+     select-wrap's ::after caret at right: 0.5rem) when the label is
+     shorter than the shared 7.5rem min width. */
+
 .dashboard-popover-chip-caret{
+  margin-left: auto;
   flex-shrink: 0;
   color: var(--muted-foreground);
 }
@@ -1350,8 +1380,12 @@
   color: var(--muted-foreground);
 }
 
+/* currentColor, not --primary: selection reads as weight + check in the
+     row's own neutral foreground — the filter bar has no brand accent and
+     the menus don't introduce one. */
+
 .dashboard-menu-item-check {
-  color: var(--primary, #1a1917);
+  color: currentColor;
 }
 
 /* Non-interactive section label between runs of related items (the flat
@@ -1369,18 +1403,27 @@
   color: var(--muted-foreground);
 }
 
-/* Widget-header wrapper for the compact "Group by" chip: right-aligned in
-     the title row, shrinkable (the chip value truncates) so it never wraps
-     narrow widgets; mr-6 clears the hover remove button. */
+/* Widget-header wrapper for the per-widget settings gear: right-aligned
+     in the title row (same slot on every header that has options; absent
+     otherwise); mr-6 clears the absolute remove button. */
 
-.dashboard-groupby-chip-wrap{
+.dashboard-widget-settings-wrap{
   margin-left: 0.5rem;
   margin-right: 1.5rem;
   display: inline-flex;
-  min-width: 0px;
-  flex-shrink: 1;
+  flex-shrink: 0;
   align-items: center;
   align-self: center;
+}
+
+/* Stacked (mobile) filter bar: the chip stretches full-width, exactly
+     like .dashboard-filter-inline-select in the 639px block below. */
+
+@media (max-width: 639px) {
+  .dashboard-popover-chip {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 /* ── Responsive layout ─────────────────────────────────────────────── */
