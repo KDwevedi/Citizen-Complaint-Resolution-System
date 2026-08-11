@@ -5,6 +5,7 @@ import {
   getTenantId,
   toRequestError,
 } from "./authService";
+import { normalizeAnalyticsBatch } from "./analyticsBatch";
 
 // Re-exported for existing importers; authService is the definition.
 export { getTenantId };
@@ -129,10 +130,11 @@ export function fetchCatalog(tenantId) {
 /**
  * POST /v2/analytics/_query — data, by kpiId reference (not inline).
  * refs: { [tileKey]: { kpiId, params } }
- * Returns { results: { [tileKey]: { columns, rows, asOf, scope } }, partial, errors }
+ * Returns { results, partial, errors: { [tileKey]: { code, message } } | null }.
+ * Legacy inline and additive top-level backend errors are normalized at this boundary.
  */
 export function runKpiBatch(refs, tenantId) {
-  return postAnalytics("/_query", { tenantId, queries: refs });
+  return postAnalytics("/_query", { tenantId, queries: refs }).then(normalizeAnalyticsBatch);
 }
 
 /** Curated PUBLIC pack. The response itself contains the safe tile descriptors. */
