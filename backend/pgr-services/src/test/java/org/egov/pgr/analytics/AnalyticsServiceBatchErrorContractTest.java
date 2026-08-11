@@ -15,6 +15,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.time.ZoneId;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -54,13 +55,17 @@ public class AnalyticsServiceBatchErrorContractTest {
                 .build();
         when(scopeResolver.resolve(same(requestInfo), eq("ke.bomet"), eq(1)))
                 .thenReturn(new AnalyticsScope("ke.bomet", false, null, null, null));
+        when(jdbc.queryForObject(eq("SELECT max(facts_built_at) FROM complaint_facts"), eq(Long.class)))
+                .thenReturn(1_718_442_000_000L);
+        when(kpiCatalogService.resolveTimeZone("ke.bomet")).thenReturn(ZoneId.of("UTC"));
     }
 
     @Test
     public void mixedBatchKeepsLegacyInlineErrorAndAddsTopLevelIndex() throws Exception {
         AnalyticsPlanner.Planned planned = new AnalyticsPlanner.Planned(
                 "SELECT 7", Collections.emptyList(), Collections.singletonList("total"), "facts");
-        when(planner.plan(any(JsonNode.class), any(AnalyticsScope.class))).thenReturn(planned);
+        when(planner.plan(any(JsonNode.class), any(AnalyticsScope.class), any(BusinessCalendar.class)))
+                .thenReturn(planned);
         when(jdbc.queryForList(eq("SELECT 7"), any(Object[].class)))
                 .thenReturn(Collections.singletonList(Map.of("total", 7)));
         when(kpiCatalogService.getDef("missing", "ke.bomet")).thenReturn(Optional.empty());
@@ -80,7 +85,7 @@ public class AnalyticsServiceBatchErrorContractTest {
 
     @Test
     public void caughtEntryExceptionIsIndexedWithoutFailingWholeBatch() throws Exception {
-        when(planner.plan(any(JsonNode.class), any(AnalyticsScope.class)))
+        when(planner.plan(any(JsonNode.class), any(AnalyticsScope.class), any(BusinessCalendar.class)))
                 .thenThrow(new IllegalArgumentException("invalid_param: bad window"));
 
         Map<String,Object> response = query("{\"queries\":{"
@@ -117,7 +122,8 @@ public class AnalyticsServiceBatchErrorContractTest {
     public void successfulBatchHasEmptyErrorIndexAndIsNotPartial() throws Exception {
         AnalyticsPlanner.Planned planned = new AnalyticsPlanner.Planned(
                 "SELECT 1", Collections.emptyList(), Collections.singletonList("total"), "facts");
-        when(planner.plan(any(JsonNode.class), any(AnalyticsScope.class))).thenReturn(planned);
+        when(planner.plan(any(JsonNode.class), any(AnalyticsScope.class), any(BusinessCalendar.class)))
+                .thenReturn(planned);
         when(jdbc.queryForList(eq("SELECT 1"), any(Object[].class)))
                 .thenReturn(Collections.singletonList(Map.of("total", 1)));
 
