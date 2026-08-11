@@ -1453,8 +1453,7 @@
         ]},
         { "and": [
             { "==": [ { "var": "user.type" }, "EMPLOYEE" ] },
-            { "in": [ { "var": "resource.complaint.department" }, { "var": "user.attributes.departments" } ] },
-            { "in": [ { "var": "resource.complaint.boundary" }, { "var": "user.attributes.jurisdictions" } ] }
+            { "in": [ { "var": "resource.complaint.department" }, { "var": "user.attributes.departments" } ] }
         ]}
       ]
     }

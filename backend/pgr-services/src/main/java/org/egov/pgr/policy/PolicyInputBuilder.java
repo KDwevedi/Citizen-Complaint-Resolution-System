@@ -4,8 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.egov.common.contract.request.RequestInfo;
 import org.egov.common.contract.request.User;
 import org.egov.pgr.analytics.AnalyticsScope;
-import org.egov.pgr.web.models.Address;
-import org.egov.pgr.web.models.Boundary;
 import org.egov.pgr.web.models.Service;
 import org.springframework.stereotype.Component;
 
@@ -29,7 +27,6 @@ public class PolicyInputBuilder {
         Map<String, Object> attributes = new LinkedHashMap<>();
         attributes.put("tenantWide", scope.tenantWide);
         attributes.put("departments", scope.departmentCodes == null ? List.of() : scope.departmentCodes);
-        attributes.put("jurisdictions", scope.jurisdictionCodes == null ? List.of() : scope.jurisdictionCodes);
 
         Map<String, Object> userDoc = new LinkedHashMap<>();
         userDoc.put("uuid", user != null ? user.getUuid() : null);
@@ -43,25 +40,10 @@ public class PolicyInputBuilder {
         complaint.put("accountId", service.getAccountId());
         complaint.put("department", extractDepartment(service));
         complaint.put("tenantId", service.getTenantId());
-        complaint.put("boundary", extractBoundary(service));
 
         Map<String, Object> resource = new LinkedHashMap<>();
         resource.put("complaint", complaint);
         return resource;
-    }
-
-    /**
-     * The complaint's jurisdiction boundary code, matched exact-match against an employee's HRMS
-     * jurisdiction assignments (AnalyticsScope#jurisdictionCodes). Null-safe: a complaint with no
-     * address/locality yields null, which never matches any non-empty jurisdiction list — fails
-     * closed rather than leaking a complaint with unresolvable location data.
-     */
-    private String extractBoundary(Service service) {
-        Address address = service.getAddress();
-        if (address == null)
-            return null;
-        Boundary locality = address.getLocality();
-        return locality == null ? null : locality.getCode();
     }
 
     /**

@@ -76,21 +76,20 @@ Seed one tenant with:
 - Two departments, **SANITATION** and **ROADS**, each with at least one complaint (department is
   resolved from MDMS at complaint create time — use complaint types mapped to different
   departments).
-- Two localities/wards, **WARD_5** and **WARD_9** (the complaint's `address.locality.code`), each
-  with at least one SANITATION complaint — needed to exercise the jurisdiction axis (§2.4a) as a
-  second, independent restriction alongside department.
-- One employee in SANITATION assigned (via HRMS `jurisdictions[]`) to WARD_5 only, one employee
-  holding a tenant-wide role (e.g. `PGR_ADMIN`).
+- Two localities/wards, **WARD_5** and **WARD_9**, each with at least one SANITATION complaint —
+  needed to prove locality does not narrow the legacy department authorization scope.
+- One employee in SANITATION with no HRMS jurisdiction assignment, plus one directly
+  action-mapped tenant-wide employee (for example `SUPERVISOR`).
 
 | # | Step | Expected |
 |---|------|----------|
 | 2.1 | Citizen A calls `_search` with no params | Only Citizen A's own complaints (existing behavior, unaffected) |
 | 2.2 | Citizen A calls `_search?ids=<Citizen B's complaint id>` | **Empty result** — this is the gap closed by this change; today (pre-change) this leaks Citizen B's complaint |
 | 2.3 | Citizen A calls `_search?serviceRequestId=<Citizen B's serviceRequestId>` | Empty result, same reasoning as 2.2 |
-| 2.4 | SANITATION/WARD_5 employee calls `_search` with any allowed employee param (e.g. `applicationStatus=PENDINGFORASSIGNMENT`) | Only SANITATION **and** WARD_5 complaints returned — a SANITATION complaint in WARD_9 must NOT appear, even though department matches (jurisdiction is now a second, independently-enforced axis, not just department) |
-| 2.4a | Same employee calls `_search?ids=<a SANITATION complaint in WARD_9>` | Empty result — proves jurisdiction is enforced even when department alone would have allowed it |
-| 2.5 | Tenant-wide role (e.g. `PGR_ADMIN`) calls `_search` | All complaints matching the query, unrestricted regardless of department or jurisdiction — confirms the bypass axis works |
-| 2.6 | Force an HRMS failure/empty-assignment for an employee (e.g. temporarily unassign them in HRMS, or remove their `jurisdictions[]` entry while keeping their department assignment) and call `_search` | **Zero results**, not a 500 and not "see everything" — fail-closed; a WARN/INFO should appear in `pgr-services` logs from `PrincipalScopeResolver` (`"no HRMS jurisdiction assignment"` or `"no active HRMS department assignment"`) and `SearchAccessPolicyService` |
+| 2.4 | SANITATION employee calls `_search` with any allowed employee param (e.g. `applicationStatus=PENDINGFORASSIGNMENT`) | All SANITATION complaints are returned across WARD_5 and WARD_9; ROADS complaints are excluded. This is the legacy RBAC + department contract. |
+| 2.4a | Same employee, with no HRMS `jurisdictions[]`, calls `_search?ids=<a SANITATION complaint in WARD_9>` | The complaint is returned — jurisdiction is not an authorization prerequisite or predicate. |
+| 2.5 | Directly mapped tenant-wide role (e.g. `SUPERVISOR`) calls `_search` | All complaints matching the query, unrestricted by department — confirms the explicit bypass axis works without changing existing RoleAction mappings. |
+| 2.6 | Force an HRMS failure/empty department assignment for a constrained employee and call `_search` | **Zero results**, not a 500 and not "see everything" — fail-closed; a WARN/INFO should appear in `pgr-services` logs from `PrincipalScopeResolver` (`"no active HRMS department assignment"`) and `SearchAccessPolicyService`. Removing only `jurisdictions[]` must not change results. |
 | 2.7 | Repeat 2.1, 2.4, 2.5 against `/request/_count` | Count matches the number of rows `_search` would return for the same caller/params |
 | 2.8 | Call `/request/_plainsearch` as any of the above principals | Behavior unchanged from before this change (cross-tenant, unrestricted) — explicitly out of scope for this rule |
 | 2.9 | Tail `pgr-services` logs while running 2.2–2.4 | No `SearchAccessPolicyService: dropping complaint ... (SQL-level scope should already have excluded this; check for drift)` WARN should appear — if it does, the SQL-level scope and the JsonLogic condition have drifted apart and need reconciling before sign-off |
@@ -125,7 +124,7 @@ curl -s -X POST "http://localhost:18000/pgr-services/v2/request/_search?tenantId
   -H "Content-Type: application/json" \
   -d '{"RequestInfo":{"apiId":"Rainmaker","authToken":"<citizenA_token>"}}' | jq
 
-# 2.4 — SANITATION employee (expect only SANITATION complaints)
+# 2.4 — SANITATION employee (expect SANITATION complaints across every locality)
 curl -s -X POST "http://localhost:18000/pgr-services/v2/request/_search?tenantId=<tenantId>&applicationStatus=PENDINGFORASSIGNMENT" \
   -H "Content-Type: application/json" \
   -d '{"RequestInfo":{"apiId":"Rainmaker","authToken":"<sanitationEmployee_token>"}}' | jq
@@ -157,7 +156,7 @@ Extends the same action (id 2008) with a structured `resource` object (see
 |---|------|----------|
 | 2b.1 | Citizen A calls `_search` for their own complaint | `citizen.mobileNumber` visible in full (own-record condition passes) |
 | 2b.2 | SANITATION employee (GRO/LME) calls `_search` for a complaint they're allowed to see (own department) | `citizen.mobileNumber` is masked (`XXXXXXXX##`, last 2 digits per the seeded `MASK_SHOW_LAST_N` rule) — the field rule is independent of the record-level department check already passing |
-| 2b.3 | Tenant-wide role (e.g. `PGR_ADMIN`) calls `_search` | `citizen.mobileNumber` visible in full (`tenantWide` condition bypass) |
+| 2b.3 | Directly mapped tenant-wide role (e.g. `SUPERVISOR`) calls `_search` | `citizen.mobileNumber` visible in full (`tenantWide` condition bypass) |
 | 2b.4 | Call `_plainsearch` as a GRO/LME | `citizen.mobileNumber` masked too — field masking applies there despite `_plainsearch` staying record-level unrestricted (§2.8) |
 | 2b.5 | Temporarily break the `condition` or `onDeny.strategy` on the `citizen.mobileNumber` rule in MDMS (e.g. remove `"condition"`, or set `"strategy": "not-a-real-strategy"`) | Field is masked for **everyone**, including the record's own citizen — fail-closed; an `AccessPolicyRegistry`/`MaskingStrategy` ERROR log names the exact path and the fallback applied |
 | 2b.6 | Add a second `attributes` entry for a different field (e.g. `citizen.emailId`) via MDMS only, no redeploy | New field is masked/visible per its own condition on the next cache refresh — confirms "add a field = data change only" |

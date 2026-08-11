@@ -88,20 +88,7 @@ class PGRQueryBuilderTest {
     }
 
     @Test
-    void jurisdictionScopeAddsLocalityInPredicate() {
-        RequestSearchCriteria criteria = RequestSearchCriteria.builder().tenantId("pg.city").build();
-        List<Object> preparedStmtList = new ArrayList<>();
-        AnalyticsScope scope = new AnalyticsScope("pg.city", false, null, null, List.of("SANITATION"), List.of("WARD_5", "WARD_6"));
-
-        String query = queryBuilder.getPGRSearchQuery(criteria, preparedStmtList, null, scope);
-
-        assertTrue(query.contains("ads.locality IN"));
-        assertTrue(preparedStmtList.contains("WARD_5"));
-        assertTrue(preparedStmtList.contains("WARD_6"));
-    }
-
-    @Test
-    void nullJurisdictionCodesAddNoLocalityPredicate() {
+    void departmentScopeDoesNotAddAnAuthorizationLocalityPredicate() {
         RequestSearchCriteria criteria = RequestSearchCriteria.builder().tenantId("pg.city").build();
         List<Object> preparedStmtList = new ArrayList<>();
         AnalyticsScope scope = new AnalyticsScope("pg.city", false, null, null, List.of("SANITATION"));

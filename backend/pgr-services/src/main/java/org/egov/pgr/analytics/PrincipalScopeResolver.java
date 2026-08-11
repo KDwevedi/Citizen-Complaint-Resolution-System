@@ -22,8 +22,8 @@ import java.util.Set;
 
 /**
  * THE SEAM. The single, isolated place that derives an {@link AnalyticsScope} (ScopeSpec) for the
- * authenticated principal. Today it resolves from HRMS (employee assignments → departments,
- * jurisdiction → boundary). Tomorrow it could evaluate a stored JsonLogic policy condition — and
+ * authenticated principal. Today it resolves from HRMS (employee assignments → departments).
+ * Tomorrow it could evaluate a stored JsonLogic policy condition — and
  * NOTHING downstream (the planner's WHERE-clause injection, the response shaping) needs to change,
  * because everyone consumes only the {@link AnalyticsScope} value object.
  *
@@ -105,18 +105,17 @@ public class PrincipalScopeResolver {
     }
 
     /**
-     * PGR search variant: preserves dashboard scope semantics while additionally requiring the
-     * exact HRMS jurisdiction axis used by the row-level search policy. DashboardConfig's
-     * dashboard-only department toggle does not disable complaint-search authorization.
+     * PGR search variant: preserves citizen ownership and employee department scope while ensuring
+     * DashboardConfig's dashboard-only department toggle cannot disable complaint-search
+     * authorization.
      */
     public AnalyticsScope resolveForPgrSearch(RequestInfo requestInfo, String tenantId, int stateLevelLen) {
         boolean stateLevel = tenantId != null && tenantId.split("\\.").length == stateLevelLen;
         User u = requestInfo == null ? null : requestInfo.getUserInfo();
         if (u == null)
-            return new AnalyticsScope(tenantId, stateLevel, null, null,
-                    List.of(DENY_ALL_DEPARTMENT), List.of());
+            return new AnalyticsScope(tenantId, stateLevel, null, null, List.of(DENY_ALL_DEPARTMENT));
         if (isPureCitizen(requestInfo))
-            return new AnalyticsScope(tenantId, stateLevel, u.getUuid(), null, null, null);
+            return new AnalyticsScope(tenantId, stateLevel, u.getUuid(), null, null);
         return resolveEmployeeScope(requestInfo, u, tenantId, stateLevel, true);
     }
 
@@ -212,48 +211,17 @@ public class PrincipalScopeResolver {
                 }
             }
 
-            // analytics module's own hierarchical jurisdiction axis: DELIBERATELY SKIPPED for now
-            // (boundaryPrefix=null).
-            //
-            // boundary_path is '|'-delimited root-first (ancestralmaterializedpath||'|'||code), so an
-            // HRMS jurisdiction whose boundary code is the path ROOT (e.g. county "BOMET") IS a valid
-            // LIKE prefix and the wiring below would work. We leave it off because, on this data, a
-            // county-level jurisdiction over-restricts: complaints filed under sibling roots (other
-            // counties at the state tenant) would be dropped, which is NOT the intended department demo.
-            // Department is the primary, exact-match axis. To enable jurisdiction scoping, uncomment the
-            // block below — applyScope already injects boundary_path LIKE prefix%. (Resolver-only change;
-            // no downstream change — the seam holds.)
+            // The analytics hierarchy axis remains deliberately disabled. In particular, complaint
+            // locality is not an authorization restriction: legacy PGR visibility is department-only.
             String boundaryPrefix = null;
-            // JsonNode jurisdictionsForAnalytics = emp.get("jurisdictions");
-            // if (jurisdictionsForAnalytics != null && jurisdictionsForAnalytics.isArray() && jurisdictionsForAnalytics.size() > 0) {
-            //     String b = jurisdictionsForAnalytics.get(0).path("boundary").asText(null);
-            //     if (b != null && !b.isEmpty()) boundaryPrefix = b;
-            // }
-
-            // PGR search's own jurisdiction axis (exact-match against a complaint's address
-            // locality, see AnalyticsScope#jurisdictionCodes). Dashboard resolution deliberately
-            // leaves this axis empty so existing analytics behavior does not change.
-            Set<String> jurisdictions = new LinkedHashSet<>();
-            if (forPgrSearch) {
-                JsonNode jurisdictionNodes = emp.get("jurisdictions");
-                if (jurisdictionNodes != null && jurisdictionNodes.isArray()) {
-                    for (JsonNode j : jurisdictionNodes) {
-                        String boundary = j.path("boundary").asText(null);
-                        if (boundary != null && !boundary.isEmpty()) jurisdictions.add(boundary);
-                    }
-                }
-            }
 
             if (departments.isEmpty())
                 return unresolvedScope(u, tenantId, stateLevel, "no active HRMS department assignment");
-            if (forPgrSearch && jurisdictions.isEmpty())
-                return unresolvedScope(u, tenantId, stateLevel, "no HRMS jurisdiction assignment");
 
             List<String> deptList = new ArrayList<>(departments);
-            List<String> jurisdictionList = forPgrSearch ? new ArrayList<>(jurisdictions) : null;
-            log.info("PrincipalScopeResolver: userName='{}' departments={} jurisdictions={} boundaryPrefix={}",
-                    userName, deptList, jurisdictionList, boundaryPrefix);
-            return new AnalyticsScope(tenantId, stateLevel, null, boundaryPrefix, deptList, jurisdictionList);
+            log.info("PrincipalScopeResolver: userName='{}' departments={} boundaryPrefix={}",
+                    userName, deptList, boundaryPrefix);
+            return new AnalyticsScope(tenantId, stateLevel, null, boundaryPrefix, deptList);
         } catch (Exception ex) {
             log.warn("HRMS scope resolution failed for '{}': {}", u.getUserName(), ex.toString());
             return unresolvedScope(u, tenantId, stateLevel, "HRMS error");

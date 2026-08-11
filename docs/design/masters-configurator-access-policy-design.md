@@ -8,7 +8,7 @@
 
 ## 1. Problem
 
-The prior two docs cover **complaint transaction** access: row-level (department, jurisdiction, citizen-ownership scoping) and column-level (per-field masking). This doc covers the remaining three asks, which are about **masters (reference/config data)** and the **configurator admin console**, not complaint transactions:
+The prior two docs cover **complaint transaction** access: row-level (department and citizen-ownership scoping) and column-level (per-field masking). This doc covers the remaining three asks, which are about **masters (reference/config data)** and the **configurator admin console**, not complaint transactions:
 
 5. **Master edit/visibility restriction by role** — `MDMS_ADMIN` can create/edit any master; `SUPERVISOR` can view but not edit/create; some masters should be hidden entirely from some roles, or shown only to specific roles.
 6. **Configurator masters list restriction** — the admin console's nav/resource list itself must reflect (5), optionally combined with the user's department.
@@ -126,7 +126,7 @@ Plus: a regression check that a master/action with **null or empty** `resource`/
 - ~~Should masters-visibility be its own new MDMS master, or folded into `Action.resource`?~~ **Resolved: neither a new master nor server-side evaluation — reuse the existing shared search `Action`'s `resource` field, evaluated client-side only (§1.1, §3.2).**
 - ~~Should the "tenant-wide bypass" role set for masters be `PrincipalScopeResolver.TENANT_WIDE_ROLES` or its own list?~~ **Resolved: no hardcoded bypass list at all.** `MDMS_ADMIN`'s full access is just the (tenant-scoped) `ACCESSCONTROL-ROLEACTIONS` mapping covering every master's write actions by convention (§3.1) — a data-authoring practice, not a role-set special-cased in code. `MDMS_ADMIN` is tenant-scoped (does not imply cross-tenant access).
 - ~~Exact phase-by-phase "visible" vs "actionable" breakdown for the onboarding wizard?~~ **Resolved: actionability = visibility (§3.3)** — `SUPERVISOR` can act on whatever masters are visible to them; `MDMS_ADMIN` can add/edit/view everything. No separate wizard-phase capability data.
-- **Still open (fast-follow, not now):** department-scoped masters visibility. Confirmed not needed in this pass — everything here is role-only UI restriction. When it is picked up, it likely mirrors how `jurisdictionCodes`/`departmentCodes` were added to `AnalyticsScope` as a second axis on top of the base engine, but that's its own short design pass later.
+- **Still open (fast-follow, not now):** department-scoped masters visibility. Confirmed not needed in this pass — everything here is role-only UI restriction. If picked up, it can reuse the existing `departmentCodes` scope concept, but needs its own short design pass.
 
 ## 8. Implementation notes (what actually shipped)
 

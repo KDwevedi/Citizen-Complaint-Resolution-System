@@ -21,7 +21,7 @@ pgr-services has a working Tier-2 policy-decision-point (PDP) for one endpoint: 
 Two more classes sit *outside* `org.egov.pgr.policy` and are genuinely PGR-specific by necessity, not by accident:
 
 - **`SearchAccessPolicyService`** — orchestrates the above for `/v2/request/_search` specifically: hardcodes `AccessPolicyRegistry.PGR_REQUEST_SEARCH_URL`, calls `PrincipalScopeResolver.resolve(...)`, and does the per-row "defense-in-depth" recheck.
-- **`PrincipalScopeResolver`** — derives an `AnalyticsScope` (citizen self-scope, or employee `departmentCodes`/`jurisdictionCodes` from HRMS, with a `TENANT_WIDE_ROLES` bypass and a fail-closed `DENY_ALL_DEPARTMENT` sentinel for principals whose HRMS lookup can't be resolved).
+- **`PrincipalScopeResolver`** — derives an `AnalyticsScope` (citizen self-scope or employee `departmentCodes` from HRMS, with an explicit `TENANT_WIDE_ROLES` bypass and a fail-closed `DENY_ALL_DEPARTMENT` sentinel when department scope cannot be resolved).
 
 **Wiring today is manual and narrow.** All of the above is invoked from exactly one class, `PGRService`, and only on some of its methods:
 
@@ -46,7 +46,7 @@ Everything in §1's "generic today" column needs **zero code changes** for a sec
 
 **Blocker B — there's no reusable orchestration facade.** `SearchAccessPolicyService` bakes the PGR search endpoint's URL constant and its own call sequence (`resolveScope` → SQL-narrow → fetch rows → `enforce` → `FieldVisibilityService.apply`) directly into one class. A second service copy-pastes this whole class today, changing a handful of lines — that's exactly the "bespoke class per service" failure mode we want to avoid.
 
-Scope resolution (`PrincipalScopeResolver`) is *correctly* service-specific and is **not** a blocker — "what does a principal's scope mean" genuinely differs per domain (HRMS department+jurisdiction for PGR; maybe an org hierarchy for a licensing service; maybe nothing at all for a service with no row-level scoping need). What's missing is a common *interface* so the orchestration facade in §3 doesn't need to know which scope resolver it's calling.
+Scope resolution (`PrincipalScopeResolver`) is *correctly* service-specific and is **not** a blocker — "what does a principal's scope mean" genuinely differs per domain (HRMS department for PGR; maybe an org hierarchy for a licensing service; maybe nothing at all for a service with no row-level scoping need). What's missing is a common *interface* so the orchestration facade in §3 doesn't need to know which scope resolver it's calling.
 
 ---
 
@@ -161,7 +161,7 @@ One `ACCESSCONTROL-ROLEACTIONS.roleactions` row per role that should be able to 
 
 ### Step 5 — Reuse or implement a `ScopeResolver`
 
-If your row-level scoping is "citizen sees own records; employee sees own department + jurisdiction via HRMS" — you likely don't need a new resolver; check if `PrincipalScopeResolver`'s existing HRMS-based logic fits and reuse it directly (it's already generic over `tenantId`/`stateLevelLen`, nothing PGR-specific in its department/jurisdiction resolution beyond calling HRMS). If your scoping model is genuinely different (e.g., an org hierarchy instead of department+jurisdiction), implement `ScopeResolver<YourScopeType>` (§3.1) — one class, following `PrincipalScopeResolver`'s fail-closed pattern: **any principal whose scope can't be resolved must be denied, never granted broad access as a fallback.**
+If your row-level scoping is "citizen sees own records; employee sees own department via HRMS" — you likely don't need a new resolver; check if `PrincipalScopeResolver`'s existing HRMS-based logic fits and reuse it directly. If your scoping model is genuinely different (e.g., an org hierarchy), implement `ScopeResolver<YourScopeType>` (§3.1) — one class, following `PrincipalScopeResolver`'s fail-closed pattern: **any principal whose required scope can't be resolved must be denied, never granted broad access as a fallback.**
 
 ### Step 6 — Write your `ResourceDocBuilder`
 
@@ -189,7 +189,7 @@ Mirror the five PGR test classes' scenario list — this is the load-bearing con
 - [ ] No matching Action visible for the caller's roles (step 4 forgotten) → denied.
 - [ ] MDMS/accesscontrol unreachable → denied, not "allow everything."
 - [ ] Scope resolution fails (e.g. HRMS lookup errors) for a non-tenant-wide role → denied, never falls back to unrestricted.
-- [ ] The actual intended-allow case: citizen owns the record; employee's department+jurisdiction (or your domain's scoping) matches.
+- [ ] The actual intended-allow case: citizen owns the record; employee's department (or your domain's scoping) matches.
 - [ ] The actual intended-deny case: a resource that legitimately shouldn't be visible.
 - [ ] Field masking: allowed condition → field passes through untouched; denied condition → correct `onDeny` strategy applied (`REDACT` → null; `MASK_SHOW_LAST_N` → correct partial reveal); unrecognized/missing `onDeny` → defaults to `REDACT`, never to "show".
 
@@ -228,5 +228,5 @@ To avoid speculative work: **do nothing here yet.** Once a second service has ac
 ## 8. Open questions
 
 - Should `ApiAccessPolicyEnforcer` live in pgr-services (fastest to ship, but a new service now depends on pgr-services) or be extracted to a new minimal module *before* the second adopter, accepting the risk of designing an interface against zero real second use cases?
-- For a resource type with no natural HRMS-department/jurisdiction analogue, is a `NoOpScopeResolver` (field-masking only, no row filtering) a real, expected use case, or should row-level `enforce()` be made optional/skippable per adopter instead of forcing a trivial resolver?
+- For a resource type with no natural HRMS-department analogue, is a `NoOpScopeResolver` (field-masking only, no row filtering) a real, expected use case, or should row-level `enforce()` be made optional/skippable per adopter instead of forcing a trivial resolver?
 - Same two unresolved questions from the original conditions design doc (JAR vs. sidecar; UI decision-endpoint vs. shipping JsonLogic client-side) — still open, still blocking a cross-frontend answer.

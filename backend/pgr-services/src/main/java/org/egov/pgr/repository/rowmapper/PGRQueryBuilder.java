@@ -209,10 +209,9 @@ public class PGRQueryBuilder {
 
     /**
      * Injects the RBAC scope's WHERE predicates. Mirrors the same axes/pattern as
-     * {@code AnalyticsPlanner.applyScope} in the analytics module (citizen self-scope, employee
-     * department-scope), plus PGR search's own jurisdiction axis (exact-match on the complaint's
-     * address locality — see {@code AnalyticsScope#jurisdictionCodes}, distinct from the analytics
-     * module's own hierarchical {@code boundaryPrefix}, which stays unwired here).
+     * {@code AnalyticsPlanner.applyScope} in the analytics module (citizen self-scope and employee
+     * department scope). Locality remains an ordinary client search criterion, not an authorization
+     * axis, preserving the legacy RBAC + department visibility contract.
      */
     private void applyScope(AnalyticsScope scope, StringBuilder builder, List<Object> preparedStmtList) {
         if (scope == null)
@@ -230,11 +229,6 @@ public class PGRQueryBuilder {
             addToPreparedStatement(preparedStmtList, scope.departmentCodes);
         }
 
-        if (!CollectionUtils.isEmpty(scope.jurisdictionCodes)) {
-            addClauseIfRequired(preparedStmtList, builder);
-            builder.append(" ads.locality IN (").append(createQuery(scope.jurisdictionCodes)).append(")");
-            addToPreparedStatement(preparedStmtList, scope.jurisdictionCodes);
-        }
     }
 
 

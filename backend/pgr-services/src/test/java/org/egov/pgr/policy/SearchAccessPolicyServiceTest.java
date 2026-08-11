@@ -45,8 +45,7 @@ class SearchAccessPolicyServiceTest {
                         )),
                         Map.of("and", List.of(
                                 Map.of("==", List.of(Map.of("var", "user.type"), "EMPLOYEE")),
-                                Map.of("in", List.of(Map.of("var", "resource.complaint.department"), Map.of("var", "user.attributes.departments"))),
-                                Map.of("in", List.of(Map.of("var", "resource.complaint.boundary"), Map.of("var", "user.attributes.jurisdictions")))
+                                Map.of("in", List.of(Map.of("var", "resource.complaint.department"), Map.of("var", "user.attributes.departments")))
                         ))
                 ));
         PolicyAction action = new PolicyAction("POST", AccessPolicyRegistry.PGR_REQUEST_SEARCH_URL,
@@ -79,48 +78,24 @@ class SearchAccessPolicyServiceTest {
      * search results.
      */
     @Test
-    void employeeScopeKeepsOnlyMatchingDepartmentAndJurisdictionComplaints() {
-        AnalyticsScope scope = new AnalyticsScope(TENANT_ID, false, null, null, List.of("SANITATION"), List.of("WARD_5"));
-        RequestInfo requestInfo = requestInfo("emp-1", "EMPLOYEE");
-
-        ServiceWrapper sanitationWard5 = wrapper("citizen-1", "SANITATION", "WARD_5", TENANT_ID);
-        ServiceWrapper roadsWard5 = wrapper("citizen-2", "ROADS", "WARD_5", TENANT_ID);
-
-        List<ServiceWrapper> result = service.enforce(requestInfo, TENANT_ID, scope, List.of(sanitationWard5, roadsWard5));
-
-        assertEquals(1, result.size());
-        assertEquals("SANITATION", ((JsonNode) result.get(0).getService().getAdditionalDetail()).get("department").asText());
-    }
-
-    @Test
-    void employeeInMatchingDepartmentButWrongJurisdictionIsDenied() {
-        AnalyticsScope scope = new AnalyticsScope(TENANT_ID, false, null, null, List.of("SANITATION"), List.of("WARD_5"));
-        RequestInfo requestInfo = requestInfo("emp-1", "EMPLOYEE");
-
-        ServiceWrapper sanitationWard9 = wrapper("citizen-1", "SANITATION", "WARD_9", TENANT_ID);
-
-        List<ServiceWrapper> result = service.enforce(requestInfo, TENANT_ID, scope, List.of(sanitationWard9));
-
-        assertTrue(result.isEmpty());
-    }
-
-    @Test
-    void employeeWithNoResolvedJurisdictionIsDeniedEvenWithMatchingDepartment() {
-        // null jurisdictionCodes (5-arg ctor) — mirrors an employee scope where jurisdiction was
-        // never resolved (should not happen post PrincipalScopeResolver's fail-closed change, but
-        // this proves the condition itself, not just the resolver, enforces the axis).
+    void employeeScopeKeepsMatchingDepartmentAcrossLocalities() {
         AnalyticsScope scope = new AnalyticsScope(TENANT_ID, false, null, null, List.of("SANITATION"));
         RequestInfo requestInfo = requestInfo("emp-1", "EMPLOYEE");
 
         ServiceWrapper sanitationWard5 = wrapper("citizen-1", "SANITATION", "WARD_5", TENANT_ID);
+        ServiceWrapper sanitationWard9 = wrapper("citizen-2", "SANITATION", "WARD_9", TENANT_ID);
+        ServiceWrapper roadsWard5 = wrapper("citizen-2", "ROADS", "WARD_5", TENANT_ID);
 
-        List<ServiceWrapper> result = service.enforce(requestInfo, TENANT_ID, scope, List.of(sanitationWard5));
+        List<ServiceWrapper> result = service.enforce(requestInfo, TENANT_ID, scope,
+                List.of(sanitationWard5, sanitationWard9, roadsWard5));
 
-        assertTrue(result.isEmpty());
+        assertEquals(2, result.size());
+        assertEquals("SANITATION", ((JsonNode) result.get(0).getService().getAdditionalDetail()).get("department").asText());
+        assertEquals("SANITATION", ((JsonNode) result.get(1).getService().getAdditionalDetail()).get("department").asText());
     }
 
     @Test
-    void tenantWideScopeKeepsEverythingRegardlessOfJurisdiction() {
+    void tenantWideScopeKeepsEverythingRegardlessOfDepartment() {
         AnalyticsScope scope = AnalyticsScope.tenantWide(TENANT_ID, false);
         RequestInfo requestInfo = requestInfo("admin-1", "EMPLOYEE");
 

@@ -35,11 +35,9 @@ import static org.mockito.Mockito.when;
  *   <li>{@link PrincipalScopeResolver#isPureCitizen}, the single source of truth for whether a
  *   principal is locked to their OWN complaints (#1071) — a misclassification here is a data
  *   leak, not a cosmetic bug, hence the fail-closed cases below.</li>
- *   <li>{@link PrincipalScopeResolver#resolve} for an employee principal: the jurisdiction
- *   resolution added alongside the existing department axis — an employee needs BOTH a
- *   resolvable department AND a resolvable jurisdiction to get a restricted (non-deny) scope;
- *   missing either fails closed via unresolvedScope, exactly like department alone did before.
- *   Tenant-wide roles still bypass regardless of HRMS data.</li>
+ *   <li>{@link PrincipalScopeResolver#resolve} for an employee principal: a resolvable department
+ *   produces the legacy department scope; HRMS jurisdiction is deliberately not an authorization
+ *   axis. Missing department still fails closed, while tenant-wide roles always bypass.</li>
  * </ul>
  * {@code catalog} is left as an unstubbed mock — {@code isDepartmentScopingDisabled} defaults to
  * {@code false}, matching "scoping enabled" for these tests.
@@ -132,30 +130,29 @@ class PrincipalScopeResolverTest {
         assertTrue(resolver.isPureCitizen(RequestInfo.builder().userInfo(user).build()));
     }
 
-    // --- resolve: employee department + jurisdiction axes ---------------------------------
+    // --- resolve: employee department scope ------------------------------------------------
 
     @Test
-    void resolvesBothDepartmentsAndJurisdictionsForANormalEmployee() {
+    void resolvesDepartmentForANormalEmployee() {
         stubHrms(List.of(Map.of("department", "SANITATION", "isCurrentAssignment", true)),
                 List.of(Map.of("boundary", "WARD_5")));
 
         AnalyticsScope scope = resolver.resolveForPgrSearch(requestInfo("emp1", "EMPLOYEE", "GRO"), "pg.city", 2);
 
         assertEquals(List.of("SANITATION"), scope.departmentCodes);
-        assertEquals(List.of("WARD_5"), scope.jurisdictionCodes);
     }
 
     @Test
-    void failsClosedWhenDepartmentResolvedButNoJurisdictionAssigned() {
+    void employeeWithDepartmentAndNoJurisdictionIsAllowed() {
         stubHrms(List.of(Map.of("department", "SANITATION", "isCurrentAssignment", true)), List.of());
 
         AnalyticsScope scope = resolver.resolveForPgrSearch(requestInfo("emp1", "EMPLOYEE", "GRO"), "pg.city", 2);
 
-        assertEquals(List.of("__scope_denied__"), scope.departmentCodes);
+        assertEquals(List.of("SANITATION"), scope.departmentCodes);
     }
 
     @Test
-    void failsClosedWhenJurisdictionResolvedButNoDepartmentAssigned() {
+    void failsClosedWhenNoDepartmentAssignedEvenIfJurisdictionExists() {
         stubHrms(List.of(), List.of(Map.of("boundary", "WARD_5")));
 
         AnalyticsScope scope = resolver.resolveForPgrSearch(requestInfo("emp1", "EMPLOYEE", "GRO"), "pg.city", 2);
@@ -170,7 +167,6 @@ class PrincipalScopeResolverTest {
         AnalyticsScope scope = resolver.resolveForPgrSearch(requestInfo("admin1", "EMPLOYEE", "SUPERUSER"), "pg.city", 2);
 
         assertNull(scope.departmentCodes);
-        assertNull(scope.jurisdictionCodes);
         assertTrue(scope.tenantWide);
     }
 
@@ -184,7 +180,6 @@ class PrincipalScopeResolverTest {
 
         assertTrue(scope.tenantWide);
         assertNull(scope.departmentCodes);
-        assertNull(scope.jurisdictionCodes);
         verify(restTemplate, never()).postForObject(any(String.class), any(), eq(Map.class));
     }
 
@@ -198,18 +193,7 @@ class PrincipalScopeResolverTest {
 
         assertTrue(scope.tenantWide);
         assertNull(scope.departmentCodes);
-        assertNull(scope.jurisdictionCodes);
         verify(restTemplate, never()).postForObject(any(String.class), any(), eq(Map.class));
-    }
-
-    @Test
-    void unionsJurisdictionsAcrossMultipleAssignments() {
-        stubHrms(List.of(Map.of("department", "SANITATION", "isCurrentAssignment", true)),
-                List.of(Map.of("boundary", "WARD_5"), Map.of("boundary", "WARD_6")));
-
-        AnalyticsScope scope = resolver.resolveForPgrSearch(requestInfo("emp1", "EMPLOYEE", "GRO"), "pg.city", 2);
-
-        assertEquals(List.of("WARD_5", "WARD_6"), scope.jurisdictionCodes);
     }
 
     private void stubHrms(List<Map<String, Object>> assignments, List<Map<String, Object>> jurisdictions) {
