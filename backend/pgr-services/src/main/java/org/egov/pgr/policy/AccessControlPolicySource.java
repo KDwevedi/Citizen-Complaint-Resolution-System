@@ -24,9 +24,8 @@ import java.util.Objects;
 /**
  * Role-scoped policy transport backed by egov-accesscontrol's MDMS action endpoint.
  *
- * <p>This component is intentionally only a source. {@link AccessPolicyRegistry} remains an
- * explicitly constructed, non-Spring type, so registering this bean does not activate policy
- * evaluation or change any request path.
+ * <p>This component is intentionally only a transport source. {@link AccessPolicyRegistry}
+ * owns role-safe caching and exact action validation; the PGR search services own evaluation.
  *
  * <p>The request deliberately omits {@code RequestInfo}: the endpoint requires only tenant and
  * roles, and forwarding caller identity through the shared tracing client would expose more data

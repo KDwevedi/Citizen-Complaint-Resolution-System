@@ -3,6 +3,8 @@ package org.egov.pgr.policy;
 import lombok.extern.slf4j.Slf4j;
 import org.egov.common.contract.request.RequestInfo;
 import org.egov.common.contract.request.Role;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -21,13 +23,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * unrelated role. Only successful, uniquely matched results are cached; denial and failures are
  * retried on the next request and always remain fail-closed.
  *
- * <p>This core registry is intentionally not a Spring component yet. It performs policy lookup and
- * caching, not authentication: callers must supply a previously authenticated, tenant-bound
- * {@link RequestInfo}. A later integration supplies the concrete {@link AccessPolicySource} and
- * wires the registry after that trusted-principal boundary.
+ * <p>The registry performs policy lookup and caching, not authentication: callers must supply a
+ * previously authenticated, tenant-bound {@link RequestInfo}. The PGR search integration wires it
+ * only after that trusted-principal boundary.
  */
 @Slf4j
+@Component
 public class AccessPolicyRegistry {
+
+    public static final String PGR_REQUEST_SEARCH_URL = "/pgr-services/v2/request/_search";
 
     static final Duration DEFAULT_TTL = Duration.ofMinutes(15);
     static final int DEFAULT_MAX_ENTRIES = 4096;
@@ -38,6 +42,7 @@ public class AccessPolicyRegistry {
     private final int maxEntries;
     private final Map<CacheKey, CachedAction> cache = new ConcurrentHashMap<>();
 
+    @Autowired
     public AccessPolicyRegistry(AccessPolicySource source) {
         this(source, Clock.systemUTC(), DEFAULT_TTL, DEFAULT_MAX_ENTRIES);
     }
