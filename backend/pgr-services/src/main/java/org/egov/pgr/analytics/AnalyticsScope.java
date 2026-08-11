@@ -25,6 +25,9 @@ import java.util.List;
  *                      search policy's own jurisdiction axis (see the access-control policy design
  *                      doc), independent of the analytics module's boundaryPrefix mechanism above.
  *                      null/empty => no jurisdiction restriction.
+ * - tenantWide:        explicitly marks a role-authorized tenant-wide bypass. This must not be
+ *                      inferred from empty department scope: an empty scope can also represent a
+ *                      dashboard configuration choice and must not silently become authorization.
  */
 public final class AnalyticsScope {
     public final String tenantId;
@@ -33,19 +36,31 @@ public final class AnalyticsScope {
     public final String boundaryPrefix;       // nullable: set => boundary_path LIKE prefix||'%'
     public final List<String> departmentCodes; // nullable/empty => no department restriction
     public final List<String> jurisdictionCodes; // nullable/empty => no jurisdiction restriction
+    public final boolean tenantWide;
 
     public AnalyticsScope(String tenantId, boolean tenantStateLevel, String citizenUuid,
                           String boundaryPrefix, List<String> departmentCodes) {
-        this(tenantId, tenantStateLevel, citizenUuid, boundaryPrefix, departmentCodes, null);
+        this(tenantId, tenantStateLevel, citizenUuid, boundaryPrefix, departmentCodes, null, false);
     }
 
     public AnalyticsScope(String tenantId, boolean tenantStateLevel, String citizenUuid,
                           String boundaryPrefix, List<String> departmentCodes, List<String> jurisdictionCodes) {
+        this(tenantId, tenantStateLevel, citizenUuid, boundaryPrefix, departmentCodes, jurisdictionCodes, false);
+    }
+
+    public static AnalyticsScope tenantWide(String tenantId, boolean tenantStateLevel) {
+        return new AnalyticsScope(tenantId, tenantStateLevel, null, null, null, null, true);
+    }
+
+    private AnalyticsScope(String tenantId, boolean tenantStateLevel, String citizenUuid,
+                           String boundaryPrefix, List<String> departmentCodes,
+                           List<String> jurisdictionCodes, boolean tenantWide) {
         this.tenantId = tenantId;
         this.tenantStateLevel = tenantStateLevel;
         this.citizenUuid = citizenUuid;
         this.boundaryPrefix = boundaryPrefix;
         this.departmentCodes = departmentCodes;
         this.jurisdictionCodes = jurisdictionCodes;
+        this.tenantWide = tenantWide;
     }
 }

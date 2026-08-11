@@ -169,6 +169,14 @@ public class PrincipalScopeResolver {
      */
     private AnalyticsScope resolveEmployeeScope(RequestInfo requestInfo, User u, String tenantId,
                                                  boolean stateLevel, boolean forPgrSearch) {
+        // Tenant-wide authorization is role-derived and must win before HRMS resolution. Otherwise
+        // an admin/supervisor who happens to have a valid assignment is incorrectly narrowed to
+        // that assignment, while the same role with no HRMS record remains unrestricted.
+        if (hasTenantWideRole(u)) {
+            log.debug("tenant-wide role '{}' — unrestricted", u.getUserName());
+            return AnalyticsScope.tenantWide(tenantId, stateLevel);
+        }
+
         // #1280: tenant-configurable department scoping. When dss.DashboardConfig.departmentScoping
         // is "disabled" for this tenant, skip HRMS department resolution entirely — the employee is
         // scoped by tenant only (no department IN filter, no fail-closed sentinel). Citizen
@@ -259,7 +267,7 @@ public class PrincipalScopeResolver {
     private AnalyticsScope unresolvedScope(User u, String tenantId, boolean stateLevel, String reason) {
         if (hasTenantWideRole(u)) {
             log.debug("scope unresolved ({}) for tenant-wide role '{}' — unrestricted", reason, u.getUserName());
-            return new AnalyticsScope(tenantId, stateLevel, null, null, null);
+            return AnalyticsScope.tenantWide(tenantId, stateLevel);
         }
         log.info("scope unresolved ({}) for constrained principal '{}' — DENY (fail-closed)", reason, u.getUserName());
         return new AnalyticsScope(tenantId, stateLevel, null, null, List.of(DENY_ALL_DEPARTMENT));

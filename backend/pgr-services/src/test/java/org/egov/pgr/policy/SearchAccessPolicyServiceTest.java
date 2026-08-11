@@ -121,7 +121,7 @@ class SearchAccessPolicyServiceTest {
 
     @Test
     void tenantWideScopeKeepsEverythingRegardlessOfJurisdiction() {
-        AnalyticsScope scope = new AnalyticsScope(TENANT_ID, false, null, null, null);
+        AnalyticsScope scope = AnalyticsScope.tenantWide(TENANT_ID, false);
         RequestInfo requestInfo = requestInfo("admin-1", "EMPLOYEE");
 
         ServiceWrapper a = wrapper("citizen-1", "SANITATION", "WARD_5", TENANT_ID);
@@ -130,6 +130,18 @@ class SearchAccessPolicyServiceTest {
         List<ServiceWrapper> result = service.enforce(requestInfo, TENANT_ID, scope, List.of(a, b));
 
         assertEquals(2, result.size());
+    }
+
+    @Test
+    void arbitraryEmptyScopeDoesNotBecomeTenantWide() {
+        AnalyticsScope scope = new AnalyticsScope(TENANT_ID, false, null, null, null);
+        RequestInfo requestInfo = requestInfo("emp-1", "EMPLOYEE");
+
+        ServiceWrapper complaint = wrapper("citizen-1", "SANITATION", "WARD_5", TENANT_ID);
+
+        List<ServiceWrapper> result = service.enforce(requestInfo, TENANT_ID, scope, List.of(complaint));
+
+        assertTrue(result.isEmpty());
     }
 
     @Test

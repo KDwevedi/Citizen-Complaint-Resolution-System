@@ -25,6 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -169,6 +171,35 @@ class PrincipalScopeResolverTest {
 
         assertNull(scope.departmentCodes);
         assertNull(scope.jurisdictionCodes);
+        assertTrue(scope.tenantWide);
+    }
+
+    @Test
+    void supervisorBypassesEvenWithValidHrmsScope() {
+        stubHrms(List.of(Map.of("department", "SANITATION", "isCurrentAssignment", true)),
+                List.of(Map.of("boundary", "WARD_5")));
+
+        AnalyticsScope scope = resolver.resolveForPgrSearch(
+                requestInfo("supervisor1", "EMPLOYEE", "SUPERVISOR"), "pg.city", 2);
+
+        assertTrue(scope.tenantWide);
+        assertNull(scope.departmentCodes);
+        assertNull(scope.jurisdictionCodes);
+        verify(restTemplate, never()).postForObject(any(String.class), any(), eq(Map.class));
+    }
+
+    @Test
+    void adminWithMappedSearchRoleBypassesEvenWithValidHrmsScope() {
+        stubHrms(List.of(Map.of("department", "SANITATION", "isCurrentAssignment", true)),
+                List.of(Map.of("boundary", "WARD_5")));
+
+        AnalyticsScope scope = resolver.resolveForPgrSearch(
+                requestInfo("admin1", "EMPLOYEE", "SUPERUSER", "GRO"), "pg.city", 2);
+
+        assertTrue(scope.tenantWide);
+        assertNull(scope.departmentCodes);
+        assertNull(scope.jurisdictionCodes);
+        verify(restTemplate, never()).postForObject(any(String.class), any(), eq(Map.class));
     }
 
     @Test
@@ -189,12 +220,12 @@ class PrincipalScopeResolverTest {
         when(restTemplate.postForObject(any(String.class), any(), eq(Map.class))).thenReturn(hrmsResponse);
     }
 
-    private RequestInfo requestInfo(String uuid, String type, String roleCode) {
+    private RequestInfo requestInfo(String uuid, String type, String... roleCodes) {
         User user = new User();
         user.setUuid(uuid);
         user.setUserName(uuid);
         user.setType(type);
-        user.setRoles(List.of(Role.builder().code(roleCode).build()));
+        user.setRoles(Arrays.stream(roleCodes).map(code -> Role.builder().code(code).build()).toList());
         RequestInfo requestInfo = new RequestInfo();
         requestInfo.setUserInfo(user);
         return requestInfo;

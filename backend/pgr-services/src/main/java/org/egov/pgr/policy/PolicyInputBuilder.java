@@ -8,7 +8,6 @@ import org.egov.pgr.web.models.Address;
 import org.egov.pgr.web.models.Boundary;
 import org.egov.pgr.web.models.Service;
 import org.springframework.stereotype.Component;
-import org.springframework.util.CollectionUtils;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,8 +27,7 @@ public class PolicyInputBuilder {
         User user = requestInfo == null ? null : requestInfo.getUserInfo();
 
         Map<String, Object> attributes = new LinkedHashMap<>();
-        boolean tenantWide = scope.citizenUuid == null && CollectionUtils.isEmpty(scope.departmentCodes);
-        attributes.put("tenantWide", tenantWide);
+        attributes.put("tenantWide", scope.tenantWide);
         attributes.put("departments", scope.departmentCodes == null ? List.of() : scope.departmentCodes);
         attributes.put("jurisdictions", scope.jurisdictionCodes == null ? List.of() : scope.jurisdictionCodes);
 
