@@ -45,7 +45,30 @@ Do not remove a legacy state while an active complaint still occupies it.
    - `utilities/default-data-handler/src/main/resources/PgrWorkflowConfig.json`
    - `utilities/crs_dataloader/templates/PgrWorkflowConfig.json`
    - `local-setup/dataloader/templates/PgrWorkflowConfig.json`
-4. Confirm the `PENDINGATLME` `ESCALATE` action points to its own current-state UUID, authorizes `SYSTEM`, and does not authorize `GRO`. An already-provisioned tenant keeps its old role list until the BusinessService is reinstalled or its `eg_wf_action.roles` row is updated.
+4. Confirm the `PENDINGATLME` `ESCALATE` action points to its own current-state UUID, authorizes `SYSTEM`, and does not authorize `GRO`.
+
+   **This step is mandatory on every already-provisioned tenant.** `DataHandlerService.createPgrWorkflowConfig` only ever POSTs a workflow `_create`; for a tenant whose PGR BusinessService already exists that call fails and the failure is deliberately swallowed ("workflow may already be POSTed"). Nothing in the seed rewrites a live graph, so `eg_wf_action_v2.roles` keeps whatever it was provisioned with and a `GRO` can still escalate until this runs:
+
+   ```sql
+   -- Verify first. Expect exactly one row per tenant.
+   SELECT a.uuid, a.tenantid, s.state, a.action, a.roles
+     FROM eg_wf_action_v2 a
+     JOIN eg_wf_state_v2 s ON s.uuid = a.currentstate
+     JOIN eg_wf_businessservice_v2 b ON b.uuid = s.businessserviceid
+    WHERE b.businessservice = 'PGR' AND a.tenantid = '<tenant>'
+      AND s.state = 'PENDINGATLME' AND a.action = 'ESCALATE';
+
+   -- Guarded on the old value, so a re-run is a no-op.
+   UPDATE eg_wf_action_v2
+      SET roles = 'PGR_LME,PGR_VIEWER,SYSTEM',
+          lastmodifiedtime = (extract(epoch from now())*1000)::bigint
+    WHERE uuid = '<uuid from the SELECT>'
+      AND roles = 'GRO,PGR_LME,PGR_VIEWER,SYSTEM';
+   ```
+
+   `roles` is a comma-separated string, not an array. Scope by `businessserviceid` as well as `tenantid`: a deployment that has run the integration suite carries throwaway `pwauto*`/`pwgen*` tenants with their own stale ESCALATE rows.
+
+   **egov-workflow-v2 caches the BusinessService graph in-JVM.** The updated roles are invisible to `businessservice/_search` and to every caller until the service is restarted — there is no Redis key to evict. Restart it, then re-read through the API rather than the database to confirm.
 5. Confirm `FORWARD`, `ASSIGNEDBYAUTOESCALATION`, `RESOLVEBYSUPERVISOR`, `PENDINGATSUPERVISOR`, and `RESOLVEDBYSUPERVISOR` are absent from the active BusinessService.
 
 Keep legacy localization strings so historical timelines remain readable.
