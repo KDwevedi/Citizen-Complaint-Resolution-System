@@ -34,6 +34,7 @@ password.
 | `POST` | `/identity/v1/password/setup-requests` | Sends a non-enumerating password setup/recovery email |
 | `GET` | `/identity/v1/password/setup-complete/:state` | One-time Keycloak action completion redirect |
 | `GET` | `/identity/v1/session` | Authentication state, opaque-session expiry, and selected tenant; never tokens |
+| `GET` | `/identity/v1/tenant-contexts/:urlSlug` | Resolves a public application slug to safe tenant metadata; grants no access |
 | `GET` | `/identity/v1/tenants` | Tenants in both Keycloak membership and DIGIT grants |
 | `POST` | `/identity/v1/contexts/_select` | Records the tenant and returns the normal DIGIT login response |
 | `POST` | `/identity/v1/organization-members/_invite` | Grants an employee access to the selected Organization and provisions their tenant-local DIGIT account |
@@ -65,6 +66,12 @@ Browser          Identity BFF              Keycloak             egov-user
 ```
 
 Frontend calls:
+
+For tenant-scoped applications, resolve `/{urlSlug}/...` first through
+`GET /identity/v1/tenant-contexts/:urlSlug`. Keep `urlSlug` as routing state;
+use the returned `tenantId` for DIGIT requests. This public lookup is not an
+authorization decision. Employee authorization occurs when `_select` verifies
+the signed-in subject's live Organization membership and active DIGIT account.
 
 1. Navigate the browser, rather than making an AJAX request, to:
 

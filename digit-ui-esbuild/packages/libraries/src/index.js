@@ -40,6 +40,7 @@ import Utils from "./utils";
 import { subFormRegistry } from "./subFormRegistry";
 import AccessControlService from "./services/elements/Access";
 import { getAuthAdapter, initAuthAdapter, AuthAdapter } from "./services/auth/index";
+import { isIdentityBffAuth } from "./services/auth/authSurface";
 
 const setupLibraries = (Library, props) => {
   window.Digit = window.Digit || {};
@@ -93,4 +94,4 @@ const initLibraries = () => {
 
 export * from "./constants/mobileValidation";
 
-export { initLibraries, Enums, Hooks, subFormRegistry, Request, MdmsService, getAuthAdapter, initAuthAdapter, AuthAdapter };
+export { initLibraries, Enums, Hooks, subFormRegistry, Request, MdmsService, getAuthAdapter, initAuthAdapter, AuthAdapter, isIdentityBffAuth };

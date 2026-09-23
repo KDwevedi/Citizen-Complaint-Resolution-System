@@ -33,6 +33,7 @@ GET  /identity/v1/auth-results/:id
 POST /identity/v1/password/setup-requests
 GET  /identity/v1/password/setup-complete/:state
 GET  /identity/v1/session
+GET  /identity/v1/tenant-contexts/:urlSlug
 GET  /identity/v1/tenants
 POST /identity/v1/contexts/_select
 POST /identity/v1/organization-members/_invite
@@ -43,6 +44,12 @@ POST /identity/v1/logout
 Organization memberships and active BFF-managed DIGIT accounts. Selecting a
 tenant returns the existing egov-user login shape, including `access_token` and
 `UserRequest`; existing DIGIT API calls continue unchanged.
+
+`GET /identity/v1/tenant-contexts/:urlSlug` is the public routing lookup used
+by tenant-prefixed applications such as `/{urlSlug}/digit-ui/employee`. It
+returns safe tenant metadata only. The lookup does not grant membership or
+authorize a tenant; authenticated employee access is still enforced by
+`POST /identity/v1/contexts/_select`.
 
 These routes are application-neutral. A caller supplies a validated `returnTo`
 path (or an absolute URL on `IDENTITY_ALLOWED_ORIGINS`), and the deployment

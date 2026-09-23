@@ -2,7 +2,7 @@ import Urls from "../../atoms/urls";
 import { Request, ServiceRequest } from "../../atoms/Utils/Request";
 import { Storage } from "../../atoms/Utils/Storage";
 import { getAuthAdapter } from "../../auth/index";
-import { isKeycloakAuth } from "../../auth/authSurface";
+import { isIdentityBffAuth, isKeycloakAuth } from "../../auth/authSurface";
 
 export const UserService = {
   authenticate: async (details) => {
@@ -63,6 +63,22 @@ export const UserService = {
     return Digit.SessionStorage.get("User");
   },
   logout: async () => {
+    if (isIdentityBffAuth()) {
+      try {
+        await fetch("/identity/v1/logout", {
+          method: "POST",
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+      } finally {
+        window.localStorage.clear();
+        window.sessionStorage.clear();
+        window.location.replace(
+          `${window.location.origin}/${window.contextPath}/employee/user/login`,
+        );
+      }
+      return;
+    }
     if (isKeycloakAuth()) {
       const adapter = getAuthAdapter();
       return adapter.logout();

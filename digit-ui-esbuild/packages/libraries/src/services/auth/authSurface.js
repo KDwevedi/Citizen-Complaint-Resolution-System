@@ -1,10 +1,12 @@
+import { parseTenantRoute } from "../tenant/tenantRoute";
+
 /**
  * Auth surface + provider resolution.
  *
  * DIGIT serves two surfaces from a single bundle: citizen
  * (`/<contextPath>/citizen/...`) and employee (`/<contextPath>/employee/...`).
- * They can use DIFFERENT auth providers — e.g. Keycloak/SSO for citizens while
- * employees stay on DIGIT password auth.
+ * Canonical tenant-scoped employee routes always use the Identity BFF. Legacy
+ * routes retain their per-surface provider settings during migration.
  *
  * Config keys (globalConfigs):
  *   CITIZEN_AUTH_PROVIDER  - provider for the citizen surface
@@ -23,14 +25,20 @@
 export function getAuthSurface(pathname) {
   const path =
     pathname || (typeof window !== "undefined" ? window.location.pathname : "");
-  // `/<contextPath>/employee/...` -> employee, anything else -> citizen.
+  // Both legacy /digit-ui/{surface} and canonical
+  // /{tenantSlug}/digit-ui/{surface} routes are supported during rollout.
   const parts = (path || "").split("/").filter(Boolean);
-  return parts[1] === "employee" ? "employee" : "citizen";
+  const mount = parts.indexOf("digit-ui");
+  return mount >= 0 && parts[mount + 1] === "employee" ? "employee" : "citizen";
 }
 
 export function getAuthProvider(pathname) {
-  const cfg = (key) => window?.globalConfigs?.getConfig(key);
-  if (getAuthSurface(pathname) === "employee") {
+  const path = pathname || (typeof window !== "undefined" ? window.location.pathname : "");
+  const cfg = (key) => typeof window !== "undefined" && window.globalConfigs?.getConfig(key);
+  if (parseTenantRoute(path)?.surface === "employee") {
+    return "identity-bff";
+  }
+  if (getAuthSurface(path) === "employee") {
     return cfg("EMPLOYEE_AUTH_PROVIDER") || "digit";
   }
   return cfg("CITIZEN_AUTH_PROVIDER") || cfg("AUTH_PROVIDER") || "digit";
@@ -38,4 +46,8 @@ export function getAuthProvider(pathname) {
 
 export function isKeycloakAuth(pathname) {
   return getAuthProvider(pathname) === "keycloak";
+}
+
+export function isIdentityBffAuth(pathname) {
+  return getAuthProvider(pathname) === "identity-bff";
 }

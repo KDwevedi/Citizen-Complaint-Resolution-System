@@ -11,8 +11,19 @@ import { DigitUnavailableError } from "../managed-accounts/digit-user-client.js"
 import { syncSubjectTenant } from "../reconciliation/subject-sync.js";
 import { currentSession } from "../sessions/current-session.js";
 import { saveSelectedIdentityContext } from "../sessions/session-store.js";
+import {
+  IdentityAdminError,
+  readOrganizationMappingForUrlSlug,
+} from "../organizations/organization-service.js";
 import type { TenantOption } from "./tenant-directory.js";
+import { isActiveDigitTenant } from "./tenant-directory.js";
 import { resolveTenantOption, resolveTenantOptions } from "./tenant-options.js";
+
+const URL_SLUG = /^[a-z0-9-]{2,63}$/;
+
+function validUrlSlug(value: string): boolean {
+  return URL_SLUG.test(value) && (value.match(/[a-z]/g) || []).length >= 2;
+}
 
 function publicTenant({ organizationId: _organizationId, ...tenant }: TenantOption) {
   return tenant;
@@ -30,6 +41,43 @@ function digitFailure(error: unknown, response: express.Response, message: strin
 }
 
 export function registerAccessContextRoutes(app: express.Application): void {
+  // Public route context contains only already-public tenant metadata. It lets
+  // every application resolve /{urlSlug}/... before React, MDMS or auth starts
+  // without exposing Keycloak Organization ids or using email/membership as a
+  // tenant-directory query. Authorization still happens in `_select`.
+  app.get("/identity/v1/tenant-contexts/:urlSlug", asyncRoute(async (request, response) => {
+    const rawUrlSlug = request.params.urlSlug;
+    const urlSlug = (Array.isArray(rawUrlSlug) ? rawUrlSlug[0] : rawUrlSlug)
+      .trim()
+      .toLowerCase();
+    if (!validUrlSlug(urlSlug)) {
+      return response.status(404).json({ error: "Tenant route is not available" });
+    }
+    try {
+      const mapping = await readOrganizationMappingForUrlSlug(urlSlug);
+      if (!mapping || !await isActiveDigitTenant(mapping.tenantId)) {
+        return response.status(404).json({ error: "Tenant route is not available" });
+      }
+      return response.json({
+        tenant: {
+          urlSlug: mapping.urlSlug,
+          tenantId: mapping.tenantId,
+          // Organizations represent independent roots today. Explicit
+          // tenant-bearing Organization Groups will extend this response with
+          // parent/fallback metadata when subtenant resolution lands.
+          rootTenantId: mapping.tenantId,
+          name: mapping.name,
+        },
+      });
+    } catch (error) {
+      if (error instanceof IdentityAdminError) {
+        console.warn("Tenant route resolution failed:", error.message);
+        return response.status(503).json({ error: "Tenant routes are temporarily unavailable" });
+      }
+      return digitFailure(error, response, "Tenant routes are temporarily unavailable");
+    }
+  }));
+
   app.get("/identity/v1/tenants", asyncRoute(async (request, response) => {
     const current = await currentSession(request.headers.cookie);
     if (!current) {

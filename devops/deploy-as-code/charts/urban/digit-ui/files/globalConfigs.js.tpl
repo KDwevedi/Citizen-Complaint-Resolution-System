@@ -33,7 +33,6 @@ var globalConfigs = (function () {
   var mapCenter = {{ .Values.globalConfigs.mapCenter | toJson }};
   var mapTenant = "{{ .Values.globalConfigs.mapTenant }}";
   var employeeModuleDenylist = {{ .Values.globalConfigs.employeeModuleDenylist | toJson }};
-  var loginTenantAllowlist = {{ .Values.globalConfigs.loginTenantAllowlist | toJson }};
   var coreMobileConfigs = {{ .Values.globalConfigs.coreMobileConfigs | toJson }};
   var corePostalConfigs = {{ .Values.globalConfigs.corePostalConfigs | toJson }};
   var dashboardMetricsEnabled = {{ .Values.globalConfigs.dashboardMetricsEnabled }};
@@ -69,7 +68,6 @@ var globalConfigs = (function () {
     else if (key === "MAP_CENTER") { return mapCenter; }
     else if (key === "MAP_TENANT") { return mapTenant; }
     else if (key === "EMPLOYEE_MODULE_DENYLIST") { return employeeModuleDenylist; }
-    else if (key === "LOGIN_TENANT_ALLOWLIST") { return loginTenantAllowlist; }
     else if (key === "CORE_MOBILE_CONFIGS") { return coreMobileConfigs; }
     else if (key === "CORE_POSTAL_CONFIGS") { return corePostalConfigs; }
     else if (key === "DASHBOARD_METRICS_ENABLED") { return dashboardMetricsEnabled; }

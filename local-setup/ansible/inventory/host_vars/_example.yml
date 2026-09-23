@@ -120,11 +120,6 @@ map_center:
   lat: 0.0
   lng: 0.0
 
-# Only these tenants can log in. Most deployments allow exactly one
-# city tenant. Leave empty to allow all.
-login_tenant_allowlist:
-  - ke.mycity
-
 # Hide these modules in the employee UI. Common: ["IM"] to hide
 # inbox-v2 if you're not running the search stack.
 employee_module_denylist:

@@ -54,7 +54,10 @@ const EmployeeApp = ({
   }, []);
 
   const additionalComponent = initData?.modules?.filter((i) => i?.additionalComponent)?.map((i) => i?.additionalComponent);
-  const isSuperUserWithMultipleRootTenant = Digit.UserService.hasAccess("SUPERUSER") && Digit.Utils.getMultiRootTenant();
+  const isSuperUserWithMultipleRootTenant =
+    !window.__digitTenantContext &&
+    Digit.UserService.hasAccess("SUPERUSER") &&
+    Digit.Utils.getMultiRootTenant();
   const hideClass = location.pathname.includes(`employee/sandbox/productDetailsPage/`);
   useEffect(() => {
     const isDirectAccess = location.pathname === path || location.pathname === `${path}/`;
@@ -92,7 +95,7 @@ const EmployeeApp = ({
             }
           >
             <Switch>
-              {!Digit.Utils.getMultiRootTenant() && (
+              {(!Digit.Utils.getMultiRootTenant() || window.__digitTenantContext) && (
                 <Route exact path={`${path}/user/login`}>
                   <EmployeeLogin stateCode={stateCode} appTenants={appTenants} />
                 </Route>

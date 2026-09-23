@@ -65,7 +65,6 @@ globalConfigs:
   mapCenter: {"lat": 20.5937, "lng": 78.9629}
   mapTenant: "pg"
   employeeModuleDenylist: ["IM"]
-  loginTenantAllowlist: []
   coreMobileConfigs: {"countryCode": "+91", "mobileNumberRegex": "^[6-9][0-9]{9}$"}
   corePostalConfigs: {}
   dashboardMetricsEnabled: false

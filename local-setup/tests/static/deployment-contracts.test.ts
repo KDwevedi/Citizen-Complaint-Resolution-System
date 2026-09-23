@@ -216,6 +216,39 @@ describe('docker-compose.egov-digit.yaml', () => {
   });
 });
 
+describe('tenant-scoped digit-ui routing', () => {
+  const nginx = read('local-setup/ansible/templates/nginx-site.conf.j2');
+  const globalConfig = read('local-setup/ansible/templates/globalConfigs.js.j2');
+  const helmTenantIngress = read(
+    'devops/deploy-as-code/charts/urban/digit-ui/templates/tenant-ingress.yaml'
+  );
+  const helmGlobalConfig = read(
+    'devops/deploy-as-code/charts/urban/digit-ui/files/globalConfigs.js.tpl'
+  );
+
+  test('Compose nginx keeps the public slug and rewrites only the internal UI mount', () => {
+    expect(nginx).toContain('location ~ ^/([a-z0-9-]{2,63})/digit-ui$');
+    expect(nginx).toContain(
+      'rewrite ^/[a-z0-9-]{2,63}/digit-ui/(.*)$ /digit-ui/$1 last;'
+    );
+  });
+
+  test('Kubernetes ingress exposes the same tenant-prefixed contract', () => {
+    expect(helmTenantIngress).toContain(
+      'path: /([a-z0-9-]{2,63})/digit-ui(/|$)(.*)'
+    );
+    expect(helmTenantIngress).toContain(
+      'nginx.ingress.kubernetes.io/rewrite-target: /digit-ui/$3'
+    );
+  });
+
+  test('tenant selection is no longer deployment global configuration', () => {
+    expect(globalConfig).not.toContain('SHOW_TENANT_SWITCHER');
+    expect(globalConfig).not.toContain('LOGIN_TENANT_ALLOWLIST');
+    expect(helmGlobalConfig).not.toContain('LOGIN_TENANT_ALLOWLIST');
+  });
+});
+
 describe('Novu workflow creation deployment contract', () => {
   const novuValues = read('devops/deploy-as-code/charts/backbone-services/novu/values.yaml');
   const dashboardValues = novuValues.slice(novuValues.lastIndexOf('\ndashboard:'));

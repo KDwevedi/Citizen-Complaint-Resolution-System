@@ -84,7 +84,10 @@ beforeAll(async () => {
     ["org-kisumu-id", "kisumu", "ke.kisumu", "Kisumu County"],
   ]) {
     await kcAdmin("/organizations", {
-      id, alias, name, enabled: true, attributes: { "digit.rootTenantId": [tenantId] },
+      id, alias, name, enabled: true, attributes: {
+        "digit.rootTenantId": [tenantId],
+        ...(alias === "bomet" && { "digit.urlSlug": ["bomet-county"] }),
+      },
     });
     await fetch(
       `${config.keycloakAdminUrl}/admin/realms/${config.keycloakOrganizationRealm}/organizations/${id}/members`,
@@ -99,6 +102,28 @@ afterAll(async () => {
 });
 
 describe("identity BFF", () => {
+  it("resolves a public URL slug without granting tenant access", async () => {
+    const resolved = await fetch(
+      `http://localhost:${getAppPort()}/identity/v1/tenant-contexts/bomet-county`,
+    );
+    expect(resolved.status).toBe(200);
+    expect(await resolved.json()).toEqual({
+      tenant: {
+        urlSlug: "bomet-county",
+        tenantId: "ke.bomet",
+        rootTenantId: "ke.bomet",
+        name: "Bomet County",
+      },
+    });
+
+    expect((await fetch(
+      `http://localhost:${getAppPort()}/identity/v1/tenant-contexts/missing-county`,
+    )).status).toBe(404);
+    expect((await fetch(
+      `http://localhost:${getAppPort()}/identity/v1/tenant-contexts/a-123`,
+    )).status).toBe(404);
+  });
+
   it("provisions Organizations and BFF-managed DIGIT accounts through the control plane", async () => {
     const base = `http://localhost:${getAppPort()}/internal/identity/v1`;
     const unauthorized = await fetch(`${base}/organizations/_ensure`, {

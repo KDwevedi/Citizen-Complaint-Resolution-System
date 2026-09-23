@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { initLibraries } from "@egovernments/digit-ui-libraries";
 import { isKeycloakAuth } from "../packages/libraries/src/services/auth/authSurface";
+import { resolveTenantRoute } from "../packages/libraries/src/services/tenant/tenantRoute";
 import "./index.css";
 import App from './App';
 import { applyTheme } from "./theme/applyTheme";
@@ -40,6 +41,22 @@ const getFromInfo = (info) => {
   return info?.tenantId || info?.tenantid || info?.userInfo?.tenantId || null;
 };
 
+const clearAuthFromAnotherTenant = (routeTenant) => {
+  if (!routeTenant) return;
+  const sessionInfo = window.Digit.SessionStorage.get("User")?.info;
+  const persistedInfo = routeTenant.surface === "employee"
+    ? getFromStorage("Employee.user-info")
+    : getFromStorage("Citizen.user-info");
+  const activeTenant = getFromInfo(sessionInfo) || getFromInfo(persistedInfo);
+  if (!activeTenant || activeTenant === routeTenant.tenantId) return;
+
+  // Auth storage predates tenant-scoped routes and is shared across tabs. Do
+  // not let a token issued for one tenant silently authenticate another URL.
+  ["token", "user-info", "Employee.token", "Employee.user-info", "Citizen.token", "Citizen.user-info"]
+    .forEach((key) => window.localStorage.removeItem(key));
+  ["User", "user_type", "userType"].forEach((key) => window.Digit.SessionStorage.del(key));
+};
+
 const normalizeLocale = () => {
   window.localStorage.setItem("locale", DEFAULT_LOCALE);
   window.localStorage.setItem("selectedLanguage", DEFAULT_LOCALE);
@@ -50,6 +67,20 @@ const normalizeLocale = () => {
 };
 
 async function bootstrap() {
+  try {
+    const resolvedTenant = await resolveTenantRoute(window.location.pathname);
+    if (resolvedTenant) {
+      window.__digitTenantContext = resolvedTenant;
+      // Compatibility bridge while upstream modules migrate from the global
+      // string to the route-context helper. This is a route base, not config.
+      window.contextPath = resolvedTenant.appBasePath;
+      window.globalPath = resolvedTenant.appBasePath;
+      clearAuthFromAnotherTenant(resolvedTenant);
+    }
+  } catch (error) {
+    window.__digitTenantContextError = error;
+  }
+
   if (isKeycloakAuth()) {
     const { initAuthAdapter } = await import(
       "../packages/libraries/src/services/auth/index"
@@ -70,7 +101,7 @@ async function bootstrap() {
       const token = getFromStorage("token");
       const citizenToken = getFromStorage("Citizen.token");
       const citizenInfo = getFromStorage("Citizen.user-info");
-      const stateCode = window?.globalConfigs?.getConfig("STATE_LEVEL_TENANT_ID");
+      const stateCode = window.__digitTenantContext?.tenantId || window?.globalConfigs?.getConfig("STATE_LEVEL_TENANT_ID");
       const citizenTenantId = getFromStorage("Citizen.tenant-id") || getFromInfo(citizenInfo) || stateCode;
       const employeeToken = getFromStorage("Employee.token");
       const employeeInfo = getFromStorage("Employee.user-info");
@@ -96,7 +127,7 @@ async function bootstrap() {
       const token = getFromStorage("token");
       const citizenToken = getFromStorage("Citizen.token");
       const citizenInfo = getFromStorage("Citizen.user-info");
-      const stateCode = window?.globalConfigs?.getConfig("STATE_LEVEL_TENANT_ID");
+      const stateCode = window.__digitTenantContext?.tenantId || window?.globalConfigs?.getConfig("STATE_LEVEL_TENANT_ID");
       const citizenTenantId = getFromStorage("Citizen.tenant-id") || getFromInfo(citizenInfo) || stateCode;
       const employeeToken = getFromStorage("Employee.token");
       const employeeInfo = getFromStorage("Employee.user-info");
@@ -118,7 +149,13 @@ async function bootstrap() {
   }
 
   normalizeLocale();
-  const stateCode = window?.globalConfigs?.getConfig("STATE_LEVEL_TENANT_ID");
+  const stateCode = window.__digitTenantContext?.tenantId || window?.globalConfigs?.getConfig("STATE_LEVEL_TENANT_ID");
+  if (window.__digitTenantContext) {
+    window.Digit.SessionStorage.set("Employee.tenantId", stateCode);
+    window.Digit.SessionStorage.set("Citizen.tenantId", stateCode);
+    window.localStorage.setItem("Employee.tenant-id", stateCode);
+    window.localStorage.setItem("Citizen.tenant-id", stateCode);
+  }
   const sessionEmployeeTenant = window.Digit.SessionStorage.get("Employee.tenantId");
   const sessionCitizenTenant = window.Digit.SessionStorage.get("Citizen.tenantId");
   if (!sessionEmployeeTenant) {

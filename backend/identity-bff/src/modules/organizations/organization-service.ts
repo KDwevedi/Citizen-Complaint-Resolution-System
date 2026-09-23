@@ -269,6 +269,7 @@ async function organizationsForTenant(
 export interface OrganizationMapping {
   organizationId: string;
   alias: string;
+  urlSlug: string;
   name: string;
   tenantId: string;
 }
@@ -281,6 +282,10 @@ function asMapping(organization: OrganizationRepresentation): OrganizationMappin
   return {
     organizationId: organization.id,
     alias: organization.alias,
+    // New Organizations persist the independently reserved public URL slug.
+    // Alias is the migration fallback for Organizations created before that
+    // attribute existed; neither value is treated as a DIGIT tenant id.
+    urlSlug: attribute(organization, "digit.urlSlug") || organization.alias,
     name: organization.name || organization.alias,
     tenantId,
   };
@@ -311,6 +316,42 @@ export async function readOrganizationMappingForTenant(
     throw new IdentityAdminError("Multiple Organizations map to this tenant", 409);
   }
   return matches[0] ? asMapping(matches[0]) : null;
+}
+
+/** Resolve the public, globally reserved URL slug without treating it as a tenant id. */
+export async function readOrganizationMappingForUrlSlug(
+  urlSlug: string,
+): Promise<OrganizationMapping | null> {
+  const normalized = urlSlug.trim().toLowerCase();
+  const attributeQuery = new URLSearchParams({
+    q: `digit.urlSlug:${normalized}`,
+    briefRepresentation: "false",
+    max: "20",
+  });
+  const aliasQuery = new URLSearchParams({
+    search: normalized,
+    exact: "true",
+    briefRepresentation: "false",
+    max: "20",
+  });
+  const responses = await Promise.all([
+    request(`/organizations?${attributeQuery}`),
+    request(`/organizations?${aliasQuery}`),
+  ]);
+  const organizations = (await Promise.all(
+    responses.map((response) => response.json() as Promise<OrganizationRepresentation[]>),
+  )).flat();
+  const seen = new Set<string>();
+  const matches = organizations.flatMap((organization) => {
+    if (!organization.id || seen.has(organization.id)) return [];
+    seen.add(organization.id);
+    const mapping = asMapping(organization);
+    return mapping?.urlSlug.toLowerCase() === normalized ? [mapping] : [];
+  });
+  if (matches.length > 1) {
+    throw new IdentityAdminError("Multiple Organizations use this URL slug", 409);
+  }
+  return matches[0] || null;
 }
 
 export async function listOrganizationMappings(): Promise<OrganizationMapping[]> {

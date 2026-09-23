@@ -47,8 +47,19 @@ const initDigitUI = () => {
 };
 
 function App() {
-  window.contextPath = window?.globalConfigs?.getConfig("CONTEXT_PATH");
+  if (window.__digitTenantContextError) {
+    return (
+      <main style={{ maxWidth: "42rem", margin: "12vh auto", padding: "2rem", fontFamily: "Roboto, sans-serif" }}>
+        <h1>Tenant unavailable</h1>
+        <p>{window.__digitTenantContextError.message}</p>
+      </main>
+    );
+  }
+  const routeTenant = window.__digitTenantContext;
+  window.contextPath = routeTenant?.appBasePath || window?.globalConfigs?.getConfig("CONTEXT_PATH");
+  window.globalPath = window.contextPath;
   const stateCode =
+    routeTenant?.tenantId ||
     window.globalConfigs?.getConfig("BOOTSTRAP_TENANT_ID") ||
     window.globalConfigs?.getConfig("STATE_LEVEL_TENANT_ID") ||
     process.env.REACT_APP_STATE_LEVEL_TENANT_ID ||
