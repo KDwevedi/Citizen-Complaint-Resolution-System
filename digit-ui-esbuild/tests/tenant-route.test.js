@@ -29,9 +29,16 @@ const {
   getAuthProvider,
   isIdentityBffAuth,
   isValidTenantSlug,
+  legacyMultiRootTenantEnabled,
   parseTenantRoute,
   resolveTenantRoute,
 } = require(OUT);
+
+test("canonical tenant routes disable legacy in-app multi-root selection", () => {
+  assert.equal(legacyMultiRootTenantEnabled(true, { tenantId: "ke.bomet" }), false);
+  assert.equal(legacyMultiRootTenantEnabled(false, null), false);
+  assert.equal(legacyMultiRootTenantEnabled(true, null), true);
+});
 
 test("tenant route parser recognizes only the canonical tenant-prefixed mount", () => {
   assert.deepEqual(parseTenantRoute("/bomet-county/digit-ui/employee/user/login"), {
@@ -77,6 +84,8 @@ test("tenant route resolver keeps the slug separate from the tenant id", async (
             urlSlug: "bomet-county",
             tenantId: "ke.bomet",
             rootTenantId: "ke",
+            parentTenantId: "ke",
+            fallbackTenantIds: ["ke"],
             name: "Bomet County Government",
           },
         }),
@@ -88,6 +97,8 @@ test("tenant route resolver keeps the slug separate from the tenant id", async (
   assert.equal(calls[0].init.credentials, "include");
   assert.equal(resolved.urlSlug, "bomet-county");
   assert.equal(resolved.tenantId, "ke.bomet");
+  assert.equal(resolved.parentTenantId, "ke");
+  assert.deepEqual(resolved.fallbackTenantIds, ["ke"]);
   assert.equal(resolved.appBasePath, "bomet-county/digit-ui");
 });
 

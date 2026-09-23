@@ -49,7 +49,9 @@ tenant returns the existing egov-user login shape, including `access_token` and
 by tenant-prefixed applications such as `/{urlSlug}/digit-ui/employee`. It
 returns safe tenant metadata only. The lookup does not grant membership or
 authorize a tenant; authenticated employee access is still enforced by
-`POST /identity/v1/contexts/_select`.
+`POST /identity/v1/contexts/_select`. The response carries the immutable
+`tenantId`, explicit `rootTenantId`, nullable `parentTenantId`, and ordered
+`fallbackTenantIds`; clients never infer hierarchy from the slug or tenant id.
 
 These routes are application-neutral. A caller supplies a validated `returnTo`
 path (or an absolute URL on `IDENTITY_ALLOWED_ORIGINS`), and the deployment
@@ -63,6 +65,7 @@ require a workload bearer token:
 
 ```http
 POST /internal/identity/v1/organizations/_ensure
+POST /internal/identity/v1/tenant-groups/_ensure
 POST /internal/identity/v1/memberships/_ensure
 POST /internal/identity/v1/role-assignments/_ensure
 POST /internal/identity/v1/reconciliation/_run

@@ -110,6 +110,8 @@ export const ULBService = {
    *
    * @returns {String}
    */ getCitizenCurrentTenant: (selectedCity = false) => {
+    const routeTenant = window.__digitTenantContext?.tenantId;
+    if (routeTenant) return routeTenant;
     const homeCity = Digit.SessionStorage.get("CITIZEN.COMMON.HOME.CITY")?.code;
     if (selectedCity) {
       return homeCity;

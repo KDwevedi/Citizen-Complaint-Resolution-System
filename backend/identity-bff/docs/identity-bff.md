@@ -72,6 +72,9 @@ For tenant-scoped applications, resolve `/{urlSlug}/...` first through
 use the returned `tenantId` for DIGIT requests. This public lookup is not an
 authorization decision. Employee authorization occurs when `_select` verifies
 the signed-in subject's live Organization membership and active DIGIT account.
+For a subtenant it additionally verifies membership in the exact
+tenant-bearing Organization Group; root Organization membership alone grants
+no subtenant access.
 
 1. Navigate the browser, rather than making an AJAX request, to:
 
@@ -270,6 +273,30 @@ tenant exists in DIGIT MDMS `tenant.tenants`. A tenant is offered only when:
 2. the Organization is enabled and mapped, and the tenant exists in DIGIT; and
 3. the managed DIGIT account is active and holds roles for that tenant.
 
+An explicit subtenant is a group inside that Organization with these durable
+attributes:
+
+```text
+digit.organizationId     Keycloak Organization UUID
+digit.tenantId           immutable DIGIT tenant id
+digit.rootTenantId       Organization's DIGIT root tenant id
+digit.parentTenantId     explicit immediate parent
+digit.urlSlug            globally reserved public route slug
+digit.displayName        safe public name
+digit.fallbackTenantIds  ordered explicit fallback ids (multi-valued)
+```
+
+This path requires Keycloak 26.7 or newer because it uses Organization Group
+membership and client-role mapping APIs. The tracked custom Keycloak image is
+currently based on 26.7.3.
+
+The BFF resolves the slug only through the Organization-scoped group API and
+checks that the group's duplicated Organization id matches that scope. Group
+paths, names, URL segments and dotted DIGIT codes never imply hierarchy. A subject must be both
+an Organization member and a member of this exact group. Only allowlisted
+client roles attached to the tenant-bearing group are projected to the
+subtenant's managed DIGIT account; they do not bleed into the root tenant.
+
 Callback and tenant discovery are read-only. Account creation happens only in
 the provisioning control plane. Role and membership projection comes from live
 Keycloak state through the control plane and reconciliation. Selection checks
@@ -366,6 +393,7 @@ calls.
 Provisioning routes require `IDENTITY_CONTROL_PLANE_TOKEN` and are idempotent:
 
 - `POST /internal/identity/v1/organizations/_ensure` — `{tenantId, alias, name}`; `409` until the DIGIT tenant exists.
+- `POST /internal/identity/v1/tenant-groups/_ensure` — `{organizationId, tenantId, parentTenantId, urlSlug, name, fallbackTenantIds?}`; creates or updates the explicit Organization-group structural record after the tenant, parent and fallbacks exist in DIGIT and map inside the same Organization.
 - `POST /internal/identity/v1/memberships/_ensure` — `{organizationId, userId, mobileNumber?}` → `{tenantId, digitUserUuid, created}` for that tenant's account. Adds Keycloak membership, then creates or updates the managed account. `digitUserUuid` input is rejected: legacy employees are not linked.
 - `POST /internal/identity/v1/role-assignments/_ensure` — sets an Organization group's allowlisted client roles and projects them to DIGIT.
 - `POST /internal/identity/v1/reconciliation/_run`

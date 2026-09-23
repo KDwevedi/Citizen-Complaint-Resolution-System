@@ -333,7 +333,7 @@ const Home = ({
           </Route>
 
           <Route exact path={`${path}/select-location`}>
-            <LocationSelection />
+            {window.__digitTenantContext ? <Redirect to={path} /> : <LocationSelection />}
           </Route>
           <Route path={`${path}/error`}>
             <ErrorComponent

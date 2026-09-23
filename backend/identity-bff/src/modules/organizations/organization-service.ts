@@ -12,6 +12,8 @@ interface OrganizationRepresentation {
 interface GroupRepresentation {
   id: string;
   name: string;
+  attributes?: Record<string, string[]>;
+  subGroups?: GroupRepresentation[];
 }
 
 interface RoleRepresentation {
@@ -240,7 +242,7 @@ export async function organizationIdentifierAvailable(type: string, value: strin
   const normalized = type === "ACCOUNT_CODE" ? value.trim().toUpperCase()
     : type === "ORGANIZATION_NAME" ? normalizedName(value)
       : value.trim().toLowerCase();
-  return !organizations.some((organization) => {
+  const organizationCollision = organizations.some((organization) => {
     if (type === "ORGANIZATION_NAME") return normalizedName(organization.name || "") === normalized;
     if (type === "ORGANIZATION_ALIAS") return organization.alias?.toLowerCase() === normalized;
     if (type === "URL_SLUG") {
@@ -251,6 +253,18 @@ export async function organizationIdentifierAvailable(type: string, value: strin
     if (type === "TENANT_ID") return mappedTenant(organization)?.toLowerCase() === normalized;
     throw new IdentityAdminError("Unsupported identifier type", 400);
   });
+  if (organizationCollision) return false;
+  if (type === "URL_SLUG") {
+    return (await organizationGroupCandidatesForAttribute(
+      organizations, "digit.urlSlug", value.trim().toLowerCase(),
+    )).length === 0;
+  }
+  if (type === "TENANT_ID") {
+    return (await organizationGroupCandidatesForAttribute(
+      organizations, "digit.tenantId", value.trim(),
+    )).length === 0;
+  }
+  return true;
 }
 
 async function organizationsForTenant(
@@ -272,6 +286,10 @@ export interface OrganizationMapping {
   urlSlug: string;
   name: string;
   tenantId: string;
+  rootTenantId: string;
+  parentTenantId: null;
+  fallbackTenantIds: string[];
+  mappingType: "organization";
 }
 
 function asMapping(organization: OrganizationRepresentation): OrganizationMapping | null {
@@ -288,6 +306,10 @@ function asMapping(organization: OrganizationRepresentation): OrganizationMappin
     urlSlug: attribute(organization, "digit.urlSlug") || organization.alias,
     name: organization.name || organization.alias,
     tenantId,
+    rootTenantId: tenantId,
+    parentTenantId: null,
+    fallbackTenantIds: organization.attributes?.["digit.fallbackTenantIds"] || [],
+    mappingType: "organization",
   };
 }
 
@@ -364,6 +386,186 @@ export async function listOrganizationMappings(): Promise<OrganizationMapping[]>
   });
 }
 
+export interface OrganizationGroupMapping {
+  organizationId: string;
+  alias: string;
+  groupId: string;
+  urlSlug: string;
+  name: string;
+  tenantId: string;
+  rootTenantId: string;
+  parentTenantId: string;
+  fallbackTenantIds: string[];
+  mappingType: "organization-group";
+}
+
+export type TenantMapping = OrganizationMapping | OrganizationGroupMapping;
+
+const TENANT_MAPPING_TTL_MS = 60_000;
+let tenantMappingCache: { value: TenantMapping[]; expiresAt: number } | null = null;
+let tenantMappingLoad: Promise<TenantMapping[]> | null = null;
+let tenantMappingGeneration = 0;
+
+export function clearTenantMappingCache(): void {
+  tenantMappingGeneration += 1;
+  tenantMappingCache = null;
+  tenantMappingLoad = null;
+}
+
+function groupAttribute(group: GroupRepresentation, name: string): string | null {
+  const values = group.attributes?.[name];
+  return Array.isArray(values) && values.length === 1 && values[0]?.trim()
+    ? values[0].trim()
+    : null;
+}
+
+function asGroupMapping(
+  group: GroupRepresentation,
+  organization: OrganizationMapping,
+): OrganizationGroupMapping | null {
+  const organizationId = groupAttribute(group, "digit.organizationId");
+  const tenantId = groupAttribute(group, "digit.tenantId");
+  const rootTenantId = groupAttribute(group, "digit.rootTenantId");
+  const parentTenantId = groupAttribute(group, "digit.parentTenantId");
+  const urlSlug = groupAttribute(group, "digit.urlSlug");
+  if (!organizationId || organizationId !== organization.organizationId ||
+      !tenantId || !rootTenantId || rootTenantId !== organization.tenantId ||
+      !parentTenantId || parentTenantId === tenantId || !urlSlug) {
+    return null;
+  }
+  return {
+    organizationId,
+    alias: organization.alias,
+    groupId: group.id,
+    urlSlug,
+    name: groupAttribute(group, "digit.displayName") || group.name,
+    tenantId,
+    rootTenantId,
+    parentTenantId,
+    fallbackTenantIds: group.attributes?.["digit.fallbackTenantIds"] || [],
+    mappingType: "organization-group",
+  };
+}
+
+async function readOrganizationGroup(
+  organizationId: string,
+  groupId: string,
+): Promise<GroupRepresentation | null> {
+  try {
+    const response = await request(
+      `/organizations/${encodeURIComponent(organizationId)}` +
+      `/groups/${encodeURIComponent(groupId)}?briefRepresentation=false`,
+    );
+    return await response.json() as GroupRepresentation;
+  } catch (error) {
+    if (error instanceof IdentityAdminError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+async function organizationGroupsForAttribute(
+  organizationId: string,
+  name: "digit.urlSlug" | "digit.tenantId",
+  value: string,
+): Promise<GroupRepresentation[]> {
+  const query = new URLSearchParams({
+    q: `${name}:${value}`,
+    exact: "true",
+    briefRepresentation: "false",
+    max: "20",
+  });
+  const response = await request(
+    `/organizations/${encodeURIComponent(organizationId)}/groups?${query}`,
+  );
+  return await response.json() as GroupRepresentation[];
+}
+
+interface OrganizationGroupCandidate {
+  organization: OrganizationMapping;
+  group: GroupRepresentation;
+}
+
+async function organizationGroupCandidatesForAttribute(
+  organizations: OrganizationRepresentation[],
+  name: "digit.urlSlug" | "digit.tenantId",
+  value: string,
+): Promise<OrganizationGroupCandidate[]> {
+  const candidates = await Promise.all(organizations.flatMap((representation) => {
+    const organization = asMapping(representation);
+    return organization ? [organizationGroupsForAttribute(
+      organization.organizationId, name, value,
+    ).then((groups) => groups.map((group) => ({ organization, group })))] : [];
+  }));
+  return candidates.flat();
+}
+
+export async function readTenantMappingForUrlSlug(urlSlug: string): Promise<TenantMapping | null> {
+  const normalized = urlSlug.trim().toLowerCase();
+  const mappings = await cachedTenantMappings();
+  return mappings.find((mapping) => mapping.urlSlug.toLowerCase() === normalized) || null;
+}
+
+export async function readTenantMappingForTenant(tenantId: string): Promise<TenantMapping | null> {
+  const mappings = await cachedTenantMappings();
+  return mappings.find((mapping) => mapping.tenantId === tenantId) || null;
+}
+
+function flattenGroups(groups: GroupRepresentation[]): GroupRepresentation[] {
+  return groups.flatMap((group) => [group, ...flattenGroups(group.subGroups || [])]);
+}
+
+export async function listTenantMappings(): Promise<TenantMapping[]> {
+  const organizations = await listOrganizationMappings();
+  const groupMappings = (await Promise.all(organizations.map(async (organization) => {
+    const query = new URLSearchParams({
+      briefRepresentation: "false",
+      populateHierarchy: "true",
+    });
+    const groups = await paged<GroupRepresentation>(
+      `/organizations/${encodeURIComponent(organization.organizationId)}/groups?${query}`,
+    );
+    return flattenGroups(groups).flatMap((group) => {
+      const mapping = asGroupMapping(group, organization);
+      return mapping ? [mapping] : [];
+    });
+  }))).flat();
+  const mappings: TenantMapping[] = [...organizations, ...groupMappings];
+  const tenants = new Set<string>();
+  const slugs = new Set<string>();
+  for (const mapping of mappings) {
+    const slug = mapping.urlSlug.toLowerCase();
+    if (tenants.has(mapping.tenantId) || slugs.has(slug)) {
+      throw new IdentityAdminError("Tenant directory contains a duplicate tenant or URL slug", 409);
+    }
+    tenants.add(mapping.tenantId);
+    slugs.add(slug);
+  }
+  return mappings;
+}
+
+async function cachedTenantMappings(): Promise<TenantMapping[]> {
+  if (tenantMappingCache && tenantMappingCache.expiresAt > Date.now()) {
+    return tenantMappingCache.value;
+  }
+  if (tenantMappingLoad) return tenantMappingLoad;
+
+  const generation = tenantMappingGeneration;
+  const load = listTenantMappings().then((value) => {
+    // A control-plane write may invalidate the directory while this scan is
+    // still in flight. Never let that older result repopulate the cache.
+    if (generation === tenantMappingGeneration) {
+      tenantMappingCache = { value, expiresAt: Date.now() + TENANT_MAPPING_TTL_MS };
+    }
+    return value;
+  });
+  tenantMappingLoad = load;
+  try {
+    return await load;
+  } finally {
+    if (tenantMappingLoad === load) tenantMappingLoad = null;
+  }
+}
+
 /**
  * `adoptExisting` decides what happens when an Organization is already mapped
  * to the tenant. The control plane's idempotent `_ensure` passes true. Signup
@@ -380,6 +582,21 @@ export async function ensureOrganization(input: {
   urlSlug?: string;
   adoptExisting: boolean;
 }): Promise<{ id: string; tenantId: string; alias: string; name: string }> {
+  const organizations = await paged<OrganizationRepresentation>(
+    "/organizations?briefRepresentation=false",
+  );
+  const [tenantGroups, slugGroups] = await Promise.all([
+    organizationGroupCandidatesForAttribute(organizations, "digit.tenantId", input.tenantId),
+    organizationGroupCandidatesForAttribute(
+      organizations, "digit.urlSlug", input.urlSlug || input.alias,
+    ),
+  ]);
+  if (tenantGroups.length || slugGroups.length) {
+    throw new IdentityAdminError(
+      "The root tenant id or URL slug is already reserved by an Organization group",
+      409,
+    );
+  }
   let matches = await organizationsForTenant(input.tenantId);
   if (matches.length > 1) {
     throw new IdentityAdminError("Multiple Organizations map to this tenant", 409);
@@ -451,6 +668,7 @@ export async function ensureOrganization(input: {
       }),
     });
   }
+  clearTenantMappingCache();
   return {
     id: organization.id,
     tenantId: input.tenantId,
@@ -741,6 +959,20 @@ export async function isOrganizationMember(organizationId: string, userId: strin
   }
 }
 
+export async function isOrganizationGroupMember(
+  organizationId: string,
+  groupId: string,
+  userId: string,
+): Promise<boolean> {
+  if (!await isOrganizationMember(organizationId, userId)) return false;
+  const response = await request(
+    `/organizations/${encodeURIComponent(organizationId)}` +
+    `/members/${encodeURIComponent(userId)}/groups?briefRepresentation=true`,
+  );
+  const groups = await response.json() as GroupRepresentation[];
+  return groups.some((group) => group.id === groupId);
+}
+
 export async function ensureOrganizationMembership(input: {
   organizationId: string;
   userId: string;
@@ -774,6 +1006,100 @@ async function ensureOrganizationGroup(
   group = groups.find((candidate) => candidate.name === name);
   if (!group) throw new IdentityAdminError("Keycloak did not create the Organization group");
   return group;
+}
+
+export async function ensureOrganizationTenantGroup(input: {
+  organizationId: string;
+  tenantId: string;
+  urlSlug: string;
+  name: string;
+  parentTenantId: string;
+  fallbackTenantIds: string[];
+}): Promise<OrganizationGroupMapping> {
+  const organization = await readOrganizationMapping(input.organizationId);
+  if (!organization) {
+    throw new IdentityAdminError("Organization is not mapped to a DIGIT root tenant", 404);
+  }
+  if (input.tenantId === organization.tenantId || input.tenantId === input.parentTenantId) {
+    throw new IdentityAdminError("Subtenant mapping must name a distinct tenant and parent", 400);
+  }
+  const [tenantCollision, slugCollision] = await Promise.all([
+    readTenantMappingForTenant(input.tenantId),
+    readTenantMappingForUrlSlug(input.urlSlug),
+  ]);
+  const sameMapping = (mapping: TenantMapping | null) =>
+    mapping?.mappingType === "organization-group" &&
+    mapping.organizationId === input.organizationId &&
+    mapping.tenantId === input.tenantId;
+  if ((tenantCollision && !sameMapping(tenantCollision)) ||
+      (slugCollision && !sameMapping(slugCollision))) {
+    throw new IdentityAdminError("Subtenant tenantId or URL slug is already mapped", 409);
+  }
+  const organizations = await paged<OrganizationRepresentation>(
+    "/organizations?briefRepresentation=false",
+  );
+  const [tenantGroups, slugGroups] = await Promise.all([
+    organizationGroupCandidatesForAttribute(organizations, "digit.tenantId", input.tenantId),
+    organizationGroupCandidatesForAttribute(organizations, "digit.urlSlug", input.urlSlug),
+  ]);
+  const existingGroupId = tenantCollision?.mappingType === "organization-group"
+    ? tenantCollision.groupId
+    : slugCollision?.mappingType === "organization-group"
+      ? slugCollision.groupId
+      : null;
+  if ([...tenantGroups, ...slugGroups].some(({ group }) => group.id !== existingGroupId)) {
+    throw new IdentityAdminError(
+      "Subtenant tenantId or URL slug is already present on another group",
+      409,
+    );
+  }
+
+  const groupName = `digit-tenant--${input.tenantId}`;
+  const base = `/organizations/${encodeURIComponent(input.organizationId)}/groups`;
+  const query = new URLSearchParams({
+    search: groupName,
+    exact: "true",
+    briefRepresentation: "false",
+    max: "20",
+  });
+  let response = await request(`${base}?${query}`);
+  const matches = await response.json() as GroupRepresentation[];
+  if (matches.length > 1) {
+    throw new IdentityAdminError("Multiple Organization groups use the subtenant record name", 409);
+  }
+  let group = matches[0];
+  if (group && !sameMapping(asGroupMapping(group, organization))) {
+    throw new IdentityAdminError("The subtenant Organization group name is already in use", 409);
+  }
+
+  const attributes = {
+    "digit.organizationId": [input.organizationId],
+    "digit.tenantId": [input.tenantId],
+    "digit.rootTenantId": [organization.tenantId],
+    "digit.parentTenantId": [input.parentTenantId],
+    "digit.urlSlug": [input.urlSlug],
+    "digit.displayName": [input.name],
+    "digit.fallbackTenantIds": [...new Set(input.fallbackTenantIds)],
+  };
+  if (!group) {
+    response = await request(base, {
+      method: "POST",
+      body: JSON.stringify({ name: groupName, attributes }),
+    }, [201]);
+    const id = response.headers.get("location")?.split("/").filter(Boolean).pop();
+    if (!id) throw new IdentityAdminError("Keycloak did not return the subtenant group id");
+    group = { id, name: groupName, attributes };
+  } else {
+    await request(`${base}/${encodeURIComponent(group.id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ ...group, name: groupName, attributes }),
+    });
+    group = { ...group, name: groupName, attributes };
+  }
+  const mapping = asGroupMapping(group, organization);
+  if (!mapping) throw new IdentityAdminError("Keycloak did not persist the subtenant mapping");
+  clearTenantMappingCache();
+  return mapping;
 }
 
 async function clientUuid(clientId: string): Promise<string> {
@@ -907,9 +1233,13 @@ export async function readOrganizationReconciliation(
 
   const uuid = await clientUuid(roleClientId);
   const groups = await paged<GroupRepresentation>(
-    `/organizations/${encodeURIComponent(organizationId)}/groups`,
+    `/organizations/${encodeURIComponent(organizationId)}/groups?briefRepresentation=false`,
   );
   for (const group of groups) {
+    // A tenant-bearing group is an independent subtenant grant. Its roles must
+    // never bleed into the root tenant merely because both records share an
+    // Organization.
+    if (groupAttribute(group, "digit.tenantId")) continue;
     const owner = assignmentOwner(group.name);
     if (subject !== undefined && owner !== null && owner !== subject) continue;
     const mappingPath =
@@ -934,6 +1264,61 @@ export async function readOrganizationReconciliation(
     memberRoles: new Map([...memberRoles].map(([member, roles]) => [
       member,
       [...roles].sort(),
+    ])),
+  };
+}
+
+/**
+ * Reconciliation state for one explicit subtenant. Organization membership
+ * establishes the root relationship, but only membership and roles on the
+ * tenant-bearing group grant this tenant. No group name/path or dotted tenant
+ * code is interpreted as hierarchy.
+ */
+export async function readOrganizationGroupReconciliation(
+  mapping: OrganizationGroupMapping,
+  roleClientId: string,
+  subject?: string,
+): Promise<OrganizationReconciliationState | null> {
+  if (!config.keycloakAllowedOrganizationRoleClients.includes(roleClientId)) {
+    throw new IdentityAdminError("Keycloak client is not allowed for Organization roles", 400);
+  }
+  const organization = await readOrganizationMapping(mapping.organizationId);
+  if (!organization || organization.tenantId !== mapping.rootTenantId) return null;
+  const group = await readOrganizationGroup(mapping.organizationId, mapping.groupId);
+  if (!group || !asGroupMapping(group, organization)) return null;
+
+  const memberRoles = new Map<string, Set<string>>();
+  if (subject === undefined) {
+    for (const member of await paged<UserRepresentation>(
+      `/organizations/${encodeURIComponent(mapping.organizationId)}` +
+      `/groups/${encodeURIComponent(mapping.groupId)}/members`,
+    )) {
+      if (member.id) memberRoles.set(member.id, new Set());
+    }
+  } else if (await isOrganizationGroupMember(
+    mapping.organizationId, mapping.groupId, subject,
+  )) {
+    memberRoles.set(subject, new Set());
+  }
+  if (memberRoles.size === 0) {
+    return { organizationId: mapping.organizationId, enabled: true, memberRoles: new Map() };
+  }
+
+  const uuid = await clientUuid(roleClientId);
+  const mappingPath =
+    `/organizations/${encodeURIComponent(mapping.organizationId)}` +
+    `/groups/${encodeURIComponent(mapping.groupId)}/role-mappings/clients/${encodeURIComponent(uuid)}`;
+  const rolesResponse = await request(mappingPath);
+  const roles = await rolesResponse.json() as RoleRepresentation[];
+  for (const desired of memberRoles.values()) {
+    for (const role of roles) desired.add(role.name);
+  }
+  return {
+    organizationId: mapping.organizationId,
+    enabled: true,
+    memberRoles: new Map([...memberRoles].map(([member, rolesForMember]) => [
+      member,
+      [...rolesForMember].sort(),
     ])),
   };
 }

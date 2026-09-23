@@ -44,9 +44,16 @@ const getFromInfo = (info) => {
 const clearAuthFromAnotherTenant = (routeTenant) => {
   if (!routeTenant) return;
   const sessionInfo = window.Digit.SessionStorage.get("User")?.info;
-  const persistedInfo = routeTenant.surface === "employee"
-    ? getFromStorage("Employee.user-info")
-    : getFromStorage("Citizen.user-info");
+  const token = getFromStorage("token");
+  const citizenToken = getFromStorage("Citizen.token");
+  const employeeToken = getFromStorage("Employee.token");
+  const persistedInfo = token && token === citizenToken
+    ? getFromStorage("Citizen.user-info")
+    : token && token === employeeToken
+      ? getFromStorage("Employee.user-info")
+      : routeTenant.surface === "citizen"
+        ? getFromStorage("Citizen.user-info")
+        : getFromStorage("Employee.user-info");
   const activeTenant = getFromInfo(sessionInfo) || getFromInfo(persistedInfo);
   if (!activeTenant || activeTenant === routeTenant.tenantId) return;
 
@@ -55,6 +62,38 @@ const clearAuthFromAnotherTenant = (routeTenant) => {
   ["token", "user-info", "Employee.token", "Employee.user-info", "Citizen.token", "Citizen.user-info"]
     .forEach((key) => window.localStorage.removeItem(key));
   ["User", "user_type", "userType"].forEach((key) => window.Digit.SessionStorage.del(key));
+};
+
+const TENANT_CONFLICT_KEY = "Digit.tenantContextConflict";
+const TENANT_AUTH_KEYS = new Set([
+  "Employee.tenant-id",
+  "Employee.user-info",
+  "Citizen.tenant-id",
+  "Citizen.user-info",
+  "tenant-id",
+  "user-info",
+]);
+
+const installCrossTabTenantGuard = (routeTenant) => {
+  if (!routeTenant) return;
+  const expected = routeTenant.tenantId;
+  window.__digitTenantContextConflict =
+    window.sessionStorage.getItem(TENANT_CONFLICT_KEY) === expected;
+
+  window.addEventListener("storage", (event) => {
+    if (!event.key || !TENANT_AUTH_KEYS.has(event.key) || !event.newValue) return;
+    const observed = event.key.endsWith("tenant-id")
+      ? parseValue(event.newValue)
+      : getFromInfo(parseValue(event.newValue));
+    if (!observed || observed === expected) return;
+
+    // localStorage is origin-wide. If another tab installs a token for a
+    // different tenant, freeze this tab before it can keep issuing requests
+    // with stale route state. Recovery is an explicit user action in App.
+    window.sessionStorage.setItem(TENANT_CONFLICT_KEY, expected);
+    window.__digitTenantContextConflict = true;
+    window.dispatchEvent(new CustomEvent("digit:tenant-context-conflict"));
+  });
 };
 
 const normalizeLocale = () => {
@@ -76,6 +115,7 @@ async function bootstrap() {
       window.contextPath = resolvedTenant.appBasePath;
       window.globalPath = resolvedTenant.appBasePath;
       clearAuthFromAnotherTenant(resolvedTenant);
+      installCrossTabTenantGuard(resolvedTenant);
     }
   } catch (error) {
     window.__digitTenantContextError = error;
@@ -153,8 +193,14 @@ async function bootstrap() {
   if (window.__digitTenantContext) {
     window.Digit.SessionStorage.set("Employee.tenantId", stateCode);
     window.Digit.SessionStorage.set("Citizen.tenantId", stateCode);
-    window.localStorage.setItem("Employee.tenant-id", stateCode);
-    window.localStorage.setItem("Citizen.tenant-id", stateCode);
+    // Several enabled PGR screens still read this legacy compatibility
+    // record directly instead of going through ULBService. Keep it pinned to
+    // the route tenant so an old city selection can never escape the URL
+    // boundary, while exposing no selector that can change it.
+    window.Digit.SessionStorage.set("CITIZEN.COMMON.HOME.CITY", {
+      code: stateCode,
+      name: window.__digitTenantContext.name,
+    });
   }
   const sessionEmployeeTenant = window.Digit.SessionStorage.get("Employee.tenantId");
   const sessionCitizenTenant = window.Digit.SessionStorage.get("Citizen.tenantId");

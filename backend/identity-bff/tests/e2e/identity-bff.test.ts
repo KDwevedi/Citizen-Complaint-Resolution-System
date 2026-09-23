@@ -9,6 +9,13 @@ import {
   saveSelectedIdentityContext,
 } from "../../src/modules/sessions/session-store.js";
 import { resetIdentityMethodCatalog } from "../../src/modules/authentication/methods.js";
+import { syncSubjectTenant } from "../../src/modules/reconciliation/subject-sync.js";
+import { desiredRolesForSubjectTenant } from "../../src/modules/reconciliation/reconciliation-service.js";
+import {
+  isOrganizationGroupMember,
+  readOrganizationGroupReconciliation,
+  readTenantMappingForTenant,
+} from "../../src/modules/organizations/organization-service.js";
 import {
   getIdentityAppPort as getAppPort,
   startIdentityTestApp as startTestApp,
@@ -16,7 +23,7 @@ import {
 } from "./identity-test-app.js";
 
 const digit = createFakeDigitUser({
-  tenants: ["ke", "ke.bomet", "ke.kisumu", "ke.nakuru", "ke.nyeri"],
+  tenants: ["ke", "ke.bomet", "ke.bomet.ulb1", "ke.kisumu", "ke.nakuru", "ke.nyeri"],
 });
 let nakuruOrganizationId = "";
 
@@ -112,6 +119,8 @@ describe("identity BFF", () => {
         urlSlug: "bomet-county",
         tenantId: "ke.bomet",
         rootTenantId: "ke.bomet",
+        parentTenantId: null,
+        fallbackTenantIds: [],
         name: "Bomet County",
       },
     });
@@ -122,6 +131,97 @@ describe("identity BFF", () => {
     expect((await fetch(
       `http://localhost:${getAppPort()}/identity/v1/tenant-contexts/a-123`,
     )).status).toBe(404);
+  });
+
+  it("resolves and selects an explicitly mapped Organization-group subtenant", async () => {
+    const ensured = await fetch(
+      `http://localhost:${getAppPort()}/internal/identity/v1/tenant-groups/_ensure`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer test-control-plane",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          organizationId: "org-bomet-id",
+          tenantId: "ke.bomet.ulb1",
+          parentTenantId: "ke.bomet",
+          fallbackTenantIds: ["ke.bomet"],
+          urlSlug: "bomet-ulb-one",
+          name: "Bomet ULB One",
+        }),
+      },
+    );
+    expect(ensured.status).toBe(200);
+    const groupId = (await ensured.json()).tenant.groupId as string;
+
+    expect((await fetch(
+      `${config.keycloakAdminUrl}/admin/realms/${config.keycloakOrganizationRealm}` +
+      `/organizations/org-bomet-id/groups/${groupId}/members/identity-user-1`,
+      { method: "PUT" },
+    )).status).toBe(204);
+    expect((await kcAdmin(
+      `/organizations/org-bomet-id/groups/${groupId}/role-mappings/clients/digit-ui-uuid`,
+      [{ id: "gro-id", name: "GRO" }],
+    )).status).toBe(204);
+    const subtenantMapping = await readTenantMappingForTenant("ke.bomet.ulb1");
+    expect(subtenantMapping?.mappingType).toBe("organization-group");
+    expect(await isOrganizationGroupMember("org-bomet-id", groupId, "identity-user-1"))
+      .toBe(true);
+    if (subtenantMapping?.mappingType === "organization-group") {
+      expect((await readOrganizationGroupReconciliation(
+        subtenantMapping, "digit-ui", "identity-user-1",
+      ))?.memberRoles.get("identity-user-1")).toEqual(["GRO"]);
+    }
+    expect(await desiredRolesForSubjectTenant("identity-user-1", "ke.bomet.ulb1"))
+      .toEqual(["GRO"]);
+    const provisioned = await syncSubjectTenant(
+      "identity-user-1", "ke.bomet.ulb1", "0712345678", "+254",
+    );
+    expect(provisioned).toMatchObject({
+      account: { tenantId: "ke.bomet.ulb1" }, created: true,
+    });
+    expect(await desiredRolesForSubjectTenant("identity-user-1", "ke.bomet"))
+      .not.toContain("GRO");
+
+    const resolved = await fetch(
+      `http://localhost:${getAppPort()}/identity/v1/tenant-contexts/bomet-ulb-one`,
+    );
+    expect(resolved.status).toBe(200);
+    expect(await resolved.json()).toEqual({
+      tenant: {
+        urlSlug: "bomet-ulb-one",
+        tenantId: "ke.bomet.ulb1",
+        rootTenantId: "ke.bomet",
+        parentTenantId: "ke.bomet",
+        fallbackTenantIds: ["ke.bomet"],
+        name: "Bomet ULB One",
+      },
+    });
+
+    const { sessionId } = await createIdentitySession({
+      accessToken: "subtenant-server-token", accessExpiresIn: 3600,
+    }, { sub: "identity-user-1", email: "person@example.com", name: "Demo Person" },
+    "digit-identity-bff");
+    const selected = await fetch(
+      `http://localhost:${getAppPort()}/identity/v1/contexts/_select`,
+      {
+        method: "POST",
+        headers: {
+          Cookie: `${config.identityCookieName}=${sessionId}`,
+          Origin: "http://localhost:3000",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ tenantId: "ke.bomet.ulb1" }),
+      },
+    );
+    expect(selected.status).toBe(200);
+    expect((await selected.json()).UserRequest).toMatchObject({
+      tenantId: "ke.bomet.ulb1",
+      roles: expect.arrayContaining([
+        expect.objectContaining({ code: "GRO", tenantId: "ke.bomet.ulb1" }),
+      ]),
+    });
   });
 
   it("provisions Organizations and BFF-managed DIGIT accounts through the control plane", async () => {
@@ -201,12 +301,12 @@ describe("identity BFF", () => {
       "ke.nakuru:EMPLOYEE", "ke.nakuru:GRO",
     ]);
     expect(nyeriAccount.roles.map((role) => `${role.tenantId}:${role.code}`)).toEqual(["ke.nyeri:EMPLOYEE"]);
-    expect(digit.accounts.size).toBe(3);
+    expect(digit.accounts.size).toBe(4);
 
     const reconciliation = await post("/reconciliation/_run", {});
     expect(reconciliation.status).toBe(200);
     expect(await reconciliation.json()).toMatchObject({
-      acquired: true, organizations: 4, unchanged: 2, unprovisioned: 2, failures: [],
+      acquired: true, organizations: 5, unchanged: 3, unprovisioned: 2, failures: [],
     });
   });
 
@@ -801,6 +901,12 @@ describe("identity BFF", () => {
           roles: ["EMPLOYEE", "GRO"],
         },
         {
+          tenantId: "ke.bomet.ulb1",
+          name: "Bomet ULB One",
+          organizationAlias: "bomet",
+          roles: ["EMPLOYEE", "GRO"],
+        },
+        {
           tenantId: "ke.kisumu",
           name: "Kisumu County",
           organizationAlias: "kisumu",
@@ -886,7 +992,7 @@ describe("identity BFF", () => {
       { headers: { Cookie: cookie } },
     );
     expect((await staleClaims.json()).tenants.map((tenant: { tenantId: string }) => tenant.tenantId))
-      .toEqual(["ke.bomet"]);
+      .toEqual(["ke.bomet", "ke.bomet.ulb1"]);
     expect(managedAccount.roles.some((role) => role.tenantId === "ke.kisumu")).toBe(false);
     managedAccount.roles = grantedRoles;
 
@@ -913,7 +1019,7 @@ describe("identity BFF", () => {
       { headers: { Cookie: cookie } },
     );
     expect((await lateMembership.json()).tenants.map((tenant: { tenantId: string }) => tenant.tenantId).sort())
-      .toEqual(["ke.bomet", "ke.kisumu", "ke.nakuru"]);
+      .toEqual(["ke.bomet", "ke.bomet.ulb1", "ke.kisumu", "ke.nakuru"]);
 
     // Membership is rechecked live in Keycloak, not only from session claims.
     await fetch(

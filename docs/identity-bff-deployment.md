@@ -12,10 +12,12 @@ The concise component boundary and source-of-truth map is in the
 | DIGIT | Keycloak |
 |---|---|
 | root tenant | Organization with `digit.rootTenantId` |
+| subtenant | tenant-bearing Organization Group with explicit tenant, slug, parent and fallback attributes |
 | application access | client / client role |
 | user identity | user principal |
 | tenant access | Organization membership |
-| tenant-specific role | role on the member's Organization group |
+| root-tenant role | role on a non-tenant-bearing member assignment group |
+| subtenant access and role | membership and role on the exact tenant-bearing Organization Group |
 
 All tenants live in one shared realm (`digit` by default). A tenant is not a
 realm. Keycloak is the source for authentication, Organization membership, and

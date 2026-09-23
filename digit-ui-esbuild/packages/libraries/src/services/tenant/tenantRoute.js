@@ -66,7 +66,16 @@ export async function resolveTenantRoute(pathname, fetchImpl) {
   }
   const body = await response.json();
   const tenant = body?.tenant;
-  if (!tenant || tenant.urlSlug !== route.urlSlug || !tenant.tenantId || !tenant.rootTenantId) {
+  const parentIsValid = tenant?.parentTenantId === null ||
+    (typeof tenant?.parentTenantId === "string" && tenant.parentTenantId.length > 0);
+  const fallbacksAreValid = Array.isArray(tenant?.fallbackTenantIds) &&
+    tenant.fallbackTenantIds.every((value) => typeof value === "string" && value.length > 0);
+  const hierarchyIsConsistent = tenant?.parentTenantId === null
+    ? tenant?.tenantId === tenant?.rootTenantId
+    : tenant?.tenantId !== tenant?.rootTenantId;
+  if (!tenant || tenant.urlSlug !== route.urlSlug || !tenant.tenantId ||
+      !tenant.rootTenantId || !parentIsValid || !fallbacksAreValid ||
+      !hierarchyIsConsistent) {
     const error = new Error("Tenant configuration could not be verified.");
     error.status = 502;
     throw error;
@@ -86,4 +95,8 @@ export function currentAppBasePath() {
 
 export function currentTenantId() {
   return tenantContext()?.tenantId || null;
+}
+
+export function legacyMultiRootTenantEnabled(configured, context = tenantContext()) {
+  return !context && Boolean(configured);
 }

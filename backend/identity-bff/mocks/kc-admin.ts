@@ -20,7 +20,7 @@ interface MockUser {
 interface RealmState {
   name: string;
   roles: Array<{ id: string; name: string; description?: string }>;
-  groups: Map<string, { id: string; name: string; path: string }>;
+  groups: Map<string, { id: string; name: string; path: string; attributes?: Record<string, string[]> }>;
   userGroups: Map<string, string[]>; // userId -> groupId[]
   userRoles: Map<string, Array<{ id: string; name: string }>>; // userId -> roles[]
   users: MockUser[];
@@ -30,7 +30,12 @@ interface RealmState {
     alias: string;
     enabled: boolean;
     attributes: Record<string, string[]>;
-    groups: Map<string, { id: string; name: string }>;
+    groups: Map<string, {
+      id: string;
+      name: string;
+      attributes?: Record<string, string[]>;
+      subGroups?: Array<{ id: string; name: string; attributes?: Record<string, string[]> }>;
+    }>;
     members: Set<string>;
     groupMembers: Map<string, Set<string>>;
     groupClientRoles: Map<string, Array<{ id: string; name: string }>>;
@@ -281,7 +286,16 @@ export function createKcAdminMock() {
     if (!realm) {
       return res.status(404).json({ error: "Realm not found" });
     }
-    res.json(Array.from(realm.groups.values()));
+    const q = String(req.query.q || "");
+    const [attribute, ...valueParts] = q.split(":");
+    const value = valueParts.join(":");
+    // Keycloak Organization groups are isolated from realm groups and are
+    // discoverable only below /organizations/{id}/groups.
+    const groups = Array.from(realm.groups.values())
+      .filter((group) => !q || group.attributes?.[attribute]?.includes(value));
+    const first = Number(req.query.first || 0);
+    const max = Number(req.query.max || groups.length || 100);
+    res.json(groups.slice(first, first + max));
   });
 
   // GET /admin/realms/:realm/users — search users (supports ?email=...&exact=true)
@@ -560,10 +574,37 @@ export function createKcAdminMock() {
     const organization = realm.organizations.get(req.params.organizationId);
     if (!organization) return res.status(404).json({ error: "not found" });
     const search = String(req.query.search || "");
-    res.json(Array.from(organization.groups.values()).filter(
-      (group) => !search || group.name === search,
-    ));
+    const q = String(req.query.q || "");
+    const [attribute, ...valueParts] = q.split(":");
+    const value = valueParts.join(":");
+    const first = Number(req.query.first || 0);
+    const max = Number(req.query.max || 100);
+    const groups = Array.from(organization.groups.values()).filter(
+      (group) => (!search || group.name === search) &&
+        (!q || group.attributes?.[attribute]?.includes(value)),
+    );
+    res.json(groups.slice(first, first + max));
   });
+
+  app.get(
+    "/admin/realms/:realm/organizations/:organizationId/groups/:groupId",
+    (req, res) => {
+      const realm = getOrCreateRealm(req.params.realm);
+      const group = realm.organizations.get(req.params.organizationId)?.groups.get(req.params.groupId);
+      return group ? res.json(group) : res.status(404).json({ error: "not found" });
+    },
+  );
+
+  app.put(
+    "/admin/realms/:realm/organizations/:organizationId/groups/:groupId",
+    (req, res) => {
+      const realm = getOrCreateRealm(req.params.realm);
+      const group = realm.organizations.get(req.params.organizationId)?.groups.get(req.params.groupId);
+      if (!group) return res.status(404).json({ error: "not found" });
+      Object.assign(group, req.body, { id: group.id });
+      return res.status(204).end();
+    },
+  );
 
   app.post("/admin/realms/:realm/organizations/:organizationId/groups", (req, res) => {
     const realm = getOrCreateRealm(req.params.realm);
@@ -574,7 +615,12 @@ export function createKcAdminMock() {
     );
     if (existing) return res.status(409).end();
     const id = crypto.randomUUID();
-    organization.groups.set(id, { id, name: req.body.name });
+    organization.groups.set(id, {
+      id,
+      name: req.body.name,
+      attributes: req.body.attributes || {},
+      subGroups: req.body.subGroups || [],
+    });
     res.status(201).set(
       "Location",
       `/admin/realms/${req.params.realm}/organizations/${req.params.organizationId}/groups/${id}`,
@@ -607,6 +653,19 @@ export function createKcAdminMock() {
       const max = Number(req.query.max || 100);
       const members = [...(organization.groupMembers.get(req.params.groupId) || new Set())];
       res.json(members.slice(first, first + max).map((id) => ({ id })));
+    },
+  );
+
+  app.get(
+    "/admin/realms/:realm/organizations/:organizationId/members/:userId/groups",
+    (req, res) => {
+      const realm = getOrCreateRealm(req.params.realm);
+      const organization = realm.organizations.get(req.params.organizationId);
+      if (!organization?.members.has(req.params.userId)) {
+        return res.status(404).json({ error: "not a member" });
+      }
+      res.json(Array.from(organization.groups.values()).filter((group) =>
+        organization.groupMembers.get(group.id)?.has(req.params.userId)));
     },
   );
 

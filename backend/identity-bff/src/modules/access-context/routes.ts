@@ -13,7 +13,7 @@ import { currentSession } from "../sessions/current-session.js";
 import { saveSelectedIdentityContext } from "../sessions/session-store.js";
 import {
   IdentityAdminError,
-  readOrganizationMappingForUrlSlug,
+  readTenantMappingForUrlSlug,
 } from "../organizations/organization-service.js";
 import type { TenantOption } from "./tenant-directory.js";
 import { isActiveDigitTenant } from "./tenant-directory.js";
@@ -54,7 +54,7 @@ export function registerAccessContextRoutes(app: express.Application): void {
       return response.status(404).json({ error: "Tenant route is not available" });
     }
     try {
-      const mapping = await readOrganizationMappingForUrlSlug(urlSlug);
+      const mapping = await readTenantMappingForUrlSlug(urlSlug);
       if (!mapping || !await isActiveDigitTenant(mapping.tenantId)) {
         return response.status(404).json({ error: "Tenant route is not available" });
       }
@@ -62,10 +62,9 @@ export function registerAccessContextRoutes(app: express.Application): void {
         tenant: {
           urlSlug: mapping.urlSlug,
           tenantId: mapping.tenantId,
-          // Organizations represent independent roots today. Explicit
-          // tenant-bearing Organization Groups will extend this response with
-          // parent/fallback metadata when subtenant resolution lands.
-          rootTenantId: mapping.tenantId,
+          rootTenantId: mapping.rootTenantId,
+          parentTenantId: mapping.parentTenantId,
+          fallbackTenantIds: mapping.fallbackTenantIds,
           name: mapping.name,
         },
       });
