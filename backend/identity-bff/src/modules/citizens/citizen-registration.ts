@@ -6,6 +6,7 @@ import {
   ManagedAccountError,
   type ManagedIdentity,
 } from "../managed-accounts/managed-account-service.js";
+import { ensureCitizenRoles } from "../onboarding/tenant-foundation.js";
 import type { DigitAccount } from "../managed-accounts/digit-user-client.js";
 import {
   citizenRegistrationValues,
@@ -138,6 +139,8 @@ export async function ensureCitizenRegistration(input: {
     throw new CitizenContextError("Citizen access is disabled for this tenant", 403);
   }
   const identity = citizenIdentity(config.keycloakIssuer, subject, tenant.tenantId);
+  // First registration at this tenant may create the root's first citizen.
+  if (!existing) await ensureCitizenRoles(identity.tenantId);
   let outcome;
   try {
     outcome = await ensureManagedAccount(identity, [], {
