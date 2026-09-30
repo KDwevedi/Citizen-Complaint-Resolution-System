@@ -6,7 +6,6 @@ import { config } from "../../src/infrastructure/config.js";
 import { resetDigitAdminToken } from "../../src/modules/managed-accounts/digit-admin-session.js";
 import { clearTenantCaches } from "../../src/modules/access-context/tenant-directory.js";
 import { runOnboardingWorkerOnce } from "../../src/modules/onboarding/worker.js";
-import { ensureCitizenRoles } from "../../src/modules/onboarding/tenant-foundation.js";
 import { createFakeDigitUser } from "../../mocks/fake-digit-user.js";
 import { getIssuer } from "../helpers.js";
 import { startIdentityTestApp, stopIdentityTestApp, getIdentityAppPort } from "./identity-test-app.js";
@@ -155,7 +154,7 @@ describe("onboarding worker", () => {
     expect(digit.mdms.has("riverside|tenant.OnboardingConfig")).toBe(false);
     expect((digit.mdms.get("riverside|ACCESSCONTROL-ROLES.roles") || [])
       .map((record) => record.data.code).sort()).toEqual([
-      "ACCOUNT_ADMIN", "CITIZEN", "EMPLOYEE", "GRO", "LOC_ADMIN", "MDMS_ADMIN", "SUPERUSER",
+      "ACCOUNT_ADMIN", "EMPLOYEE", "GRO", "LOC_ADMIN", "MDMS_ADMIN", "SUPERUSER",
     ]);
     expect(digit.workflows.has("riverside")).toBe(false);
 
@@ -172,26 +171,6 @@ describe("onboarding worker", () => {
   // Dhruv review, #2088: a fresh signup that lands on an existing tenant or
   // Organization must not be provisioned — completing it would grant the signer
   // SUPERUSER/ACCOUNT_ADMIN/MDMS_ADMIN over somebody else's workspace.
-  it("backfills citizen roles at a root founded before they were seeded", async () => {
-    // A root onboarded before #2167 carries only the tenant-admin roles, so
-    // egov-user rejects the first managed CITIZEN account there.
-    const key = "legacyroot|ACCESSCONTROL-ROLES.roles";
-    digit.mdms.set(key, ["EMPLOYEE", "GRO"].map((code) => ({
-      tenantId: "legacyroot", schemaCode: "ACCESSCONTROL-ROLES.roles",
-      uniqueIdentifier: `ACCESSCONTROL-ROLES.roles.${code}`, data: { code, name: code }, isActive: true,
-    })));
-    digit.schemas.set("legacyroot", new Map([["ACCESSCONTROL-ROLES.roles", {
-      tenantId: "legacyroot", code: "ACCESSCONTROL-ROLES.roles", description: "roles",
-      definition: { type: "object" }, isActive: true,
-    }]]));
-
-    await ensureCitizenRoles("legacyroot");
-    await ensureCitizenRoles("legacyroot");
-
-    expect((digit.mdms.get(key) || []).map((record) => record.data.code).sort())
-      .toEqual(["CITIZEN", "EMPLOYEE", "GRO"]);
-  });
-
   it("refuses a fresh signup for a tenant that already exists", async () => {
     const intruder = await kcUser("tenant-admin-intruder");
     pgr.queue.push(operation("op-4", intruder, "riverside", "9812345670"));

@@ -80,7 +80,7 @@ export function createFakeDigitUser(options: { tenants: string[]; validateRoles?
     data: { code: "PG", name: "Bootstrap", languages: [{ label: "ENGLISH", value: "en_IN" }] }, isActive: true,
   }]);
   const bootstrapRoles = [
-    "EMPLOYEE", "GRO", "PGR_VIEWER", "ACCOUNT_ADMIN", "MDMS_ADMIN", "LOC_ADMIN", "SUPERUSER", "CITIZEN",
+    "EMPLOYEE", "GRO", "PGR_VIEWER", "ACCOUNT_ADMIN", "MDMS_ADMIN", "LOC_ADMIN", "SUPERUSER",
   ];
   mdms.set(mdmsKey("pg", "ACCESSCONTROL-ROLES.roles"), bootstrapRoles.map((code) => ({
     tenantId: "pg", schemaCode: "ACCESSCONTROL-ROLES.roles", uniqueIdentifier: `role-${code}`,

@@ -1,5 +1,5 @@
 import { config } from "../../infrastructure/config.js";
-import { digitProvisionerConfigured, withDigitProvisioner } from "../managed-accounts/digit-admin-session.js";
+import { withDigitProvisioner } from "../managed-accounts/digit-admin-session.js";
 import { DigitUnauthorizedError, DigitUnavailableError } from "../managed-accounts/digit-user-client.js";
 import { clearTenantCaches, isActiveDigitTenant } from "../access-context/tenant-directory.js";
 
@@ -142,27 +142,22 @@ function roleCode(record: MdmsRecord): string {
   return typeof record.data?.code === "string" ? record.data.code : "";
 }
 
-function citizenRoleCodes(): string[] {
-  return [...new Set(config.digitCitizenRoles)].sort();
-}
-
 function requiredDigitRoleCodes(): string[] {
   return [...new Set([
     ...config.digitManagedBaseRoles,
     ...config.onboardingTenantAdminRoles.filter((code) =>
       config.digitManagedRoleAllowlist.includes(code)),
-    // A new root is also where egov-user files its citizens (#2167).
-    ...citizenRoleCodes(),
   ])].sort();
 }
 
 /**
  * egov-user validates every assigned role against the account tenant's own
  * ACCESSCONTROL-ROLES.roles records. Seed only the roles needed by the first
- * managed tenant-admin account and by BFF-managed citizens; the rest of the
- * platform baseline remains a separate configuration concern.
+ * managed tenant-admin account; the rest of the platform baseline remains a
+ * separate configuration concern.
  */
-async function ensureTenantRoles(token: string, target: string, requiredCodes: string[]): Promise<void> {
+async function ensureTenantAdminRoles(token: string, target: string): Promise<void> {
+  const requiredCodes = requiredDigitRoleCodes();
   await ensureSchema(token, target, ROLE_SCHEMA_CODE);
 
   const targetCodes = new Set((await roleRecords(token, target, requiredCodes))
@@ -343,19 +338,8 @@ export async function ensureTenantFoundation(
   await withDigitProvisioner(async (token) => {
     await ensureTenantSchema(token, signup.requestedTenantId);
     await ensureTenantRecord(token, signup, options.adoptExisting);
-    await ensureTenantRoles(token, signup.requestedTenantId, requiredDigitRoleCodes());
+    await ensureTenantAdminRoles(token, signup.requestedTenantId);
     await ensureMobileValidation(token, signup.requestedTenantId, signup.countryCode);
   });
   await ensureEncryptionKey(signup);
-}
-
-/**
- * Backfills the citizen role definitions at a root created before
- * TENANT_FOUNDATION seeded them, so egov-user accepts the first managed
- * CITIZEN account there. A no-op search once the roles exist; without a
- * provisioner the account create fails as before.
- */
-export async function ensureCitizenRoles(rootTenantId: string): Promise<void> {
-  if (!digitProvisionerConfigured()) return;
-  await withDigitProvisioner((token) => ensureTenantRoles(token, rootTenantId, citizenRoleCodes()));
 }
