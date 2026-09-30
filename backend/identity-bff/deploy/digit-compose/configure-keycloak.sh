@@ -252,6 +252,16 @@ configure_digit_ui_client() {
   printf '%s' "$client_uuid_value"
 }
 
+# Keeps every attribute an admin can see (ADMIN_EDIT, instead of silently
+# dropping unmanaged attributes). Written as JSON because kcadm cannot set the
+# dotted `unmanagedAttributePolicy` key.
+configure_user_profile() {
+  kc get users/profile -r "$REALM" |
+    jq '.unmanagedAttributePolicy = "ADMIN_EDIT"' |
+    docker exec -i "$KEYCLOAK_CONTAINER" /opt/keycloak/bin/kcadm.sh \
+      update users/profile -r "$REALM" -f - --config "$KC_CONFIG" >/dev/null
+}
+
 configure_first_broker_login() {
   # Pin the account-linking behaviour instead of inheriting whatever a realm's
   # default happens to contain. Keycloak 26's built-in flow already has the
@@ -350,7 +360,7 @@ fi
 # and existing realms even when the optional magic-link resource is disabled.
 kc update "realms/$REALM" -s organizationsEnabled=true \
   -s loginWithEmailAllowed=true -s duplicateEmailsAllowed=false \
-  -s resetPasswordAllowed=false \
+  -s resetPasswordAllowed=false -s bruteForceProtected=true \
   -s "sslRequired=$SSL_REQUIRED" >/dev/null
 
 # The DIGIT theme is selected per client below (CCRS #2108) so that a client
@@ -439,6 +449,7 @@ if [ -n "${KEYCLOAK_EMPLOYEE_CLIENT_SECRET:-}" ] && [ -n "${KEYCLOAK_CITIZEN_CLI
 else
   printf 'KEYCLOAK_EMPLOYEE_CLIENT_SECRET / KEYCLOAK_CITIZEN_CLIENT_SECRET unset: digit-ui clients not configured\n' >&2
 fi
+configure_user_profile
 
 if [ "${KEYCLOAK_MAGIC_LINK_ENABLED:-false}" = true ]; then
   configure_magic_link
