@@ -435,6 +435,8 @@ ensure_mapper "client-scopes/$organization_scope" 'organization groups' \
   -s 'config."addGroupRoleMappings"=true'
 kc update "clients/$bff_uuid/optional-client-scopes/$organization_scope" -r "$REALM" -n >/dev/null
 
+configure_user_profile
+
 # digit-ui employee and citizen sign-in (CCRS #2167). Skipped, not failed,
 # while an older installer has not generated their secrets yet.
 digit_ui_clients=skipped
