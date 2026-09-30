@@ -451,7 +451,6 @@ if [ -n "${KEYCLOAK_EMPLOYEE_CLIENT_SECRET:-}" ] && [ -n "${KEYCLOAK_CITIZEN_CLI
 else
   printf 'KEYCLOAK_EMPLOYEE_CLIENT_SECRET / KEYCLOAK_CITIZEN_CLIENT_SECRET unset: digit-ui clients not configured\n' >&2
 fi
-configure_user_profile
 
 if [ "${KEYCLOAK_MAGIC_LINK_ENABLED:-false}" = true ]; then
   configure_magic_link
