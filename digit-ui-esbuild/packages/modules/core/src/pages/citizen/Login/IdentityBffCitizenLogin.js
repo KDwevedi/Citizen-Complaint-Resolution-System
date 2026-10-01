@@ -46,6 +46,8 @@ const IdentityBffCitizenLogin = ({ t }) => {
   const [otp, setOtp] = useState("");
   const [challengeId, setChallengeId] = useState(null);
   const [resendAfter, setResendAfter] = useState(undefined);
+  // Remounts SelectOtp so its timer restarts from `resendAfter`.
+  const [otpStep, setOtpStep] = useState(0);
   const [phoneAlert, setPhoneAlert] = useState("");
   const [otpError, setOtpError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -89,7 +91,8 @@ const IdentityBffCitizenLogin = ({ t }) => {
   // Phone OTP runs in digit-ui; any other method is a Keycloak redirect.
   const startSignIn = async () => {
     const offered = methods || (await fetchCitizenSigninMethods({ fetchImpl }));
-    setMethods(offered);
+    // A failed lookup is not remembered, so "Try again" asks the BFF again.
+    if (offered.ok) setMethods(offered);
     if (offered.phoneOtp) {
       setStatus("phone");
     } else if (offered.redirect) {
@@ -99,6 +102,13 @@ const IdentityBffCitizenLogin = ({ t }) => {
       setMessage(unavailable());
     }
   };
+
+  // The failure card's buttons: a rejected lookup shows the error, not nothing.
+  const retry = (step) =>
+    step().catch(() => {
+      setStatus("error");
+      setMessage(unavailable());
+    });
 
   const completeSignIn = (user) => {
     // `user.info.tenantId` is the root the DIGIT citizen account lives at
@@ -157,6 +167,7 @@ const IdentityBffCitizenLogin = ({ t }) => {
     }
     setChallengeId(sent.challengeId);
     setResendAfter(sent.resendAfter);
+    setOtpStep((step) => step + 1);
     setOtp("");
     setOtpError("");
     setStatus("otp");
@@ -164,7 +175,11 @@ const IdentityBffCitizenLogin = ({ t }) => {
 
   // Resolves to the seconds until the next resend, for SelectOtp's timer.
   const resendCode = async () => {
+    // One request at a time: a resend replaces the challenge being verified.
+    if (busy) return 0;
+    setBusy(true);
     const sent = await sendCode().catch(() => null);
+    setBusy(false);
     if (sent?.ok) {
       setChallengeId(sent.challengeId);
       setOtp("");
@@ -189,12 +204,17 @@ const IdentityBffCitizenLogin = ({ t }) => {
     try {
       const verified = await verifyCitizenOtp({ tenant, challengeId, code: otp, fetchImpl });
       if (!verified.ok) {
-        if (verified.code === "OTP_INVALID" || verified.code === "OTP_EXPIRED") {
+        if (verified.code === "OTP_INVALID" && verified.attemptsRemaining !== 0) {
           setOtp("");
           setOtpError(failureText(verified));
-          if (verified.code === "OTP_EXPIRED") setResendAfter(0);
+        } else if (verified.code === "OTP_EXPIRED") {
+          setOtp("");
+          setOtpError(failureText(verified));
+          setResendAfter(0);
+          setOtpStep((step) => step + 1);
         } else {
-          // Locked, disabled or a failed sign-in: this challenge is spent.
+          // No attempts left, locked, disabled or a failed sign-in: this
+          // challenge is spent, so start again from the number.
           backToPhone(failureText(verified));
         }
         return;
@@ -247,6 +267,7 @@ const IdentityBffCitizenLogin = ({ t }) => {
   if (status === "otp") {
     return (
       <SelectOtp
+        key={otpStep}
         t={t}
         config={steps[1]}
         recipient={[validationConfig.prefix, mobileNumber].filter(Boolean).join(" ")}
@@ -260,6 +281,7 @@ const IdentityBffCitizenLogin = ({ t }) => {
         resendAfter={resendAfter}
         error={!otpError}
         errorMessage={otpError}
+        onChangeNumber={() => backToPhone("")}
         canSubmit={!busy}
       />
     );
@@ -310,8 +332,8 @@ const IdentityBffCitizenLogin = ({ t }) => {
             status === "forbidden"
               ? Digit.UserService.logout
               : status === "error"
-                ? establishCitizenSession
-                : startSignIn
+                ? () => retry(establishCitizenSession)
+                : () => retry(startSignIn)
           }
         >
           {status === "forbidden"
