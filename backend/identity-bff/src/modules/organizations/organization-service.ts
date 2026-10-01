@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { getRedis } from "../../infrastructure/redis.js";
 import { config } from "../../infrastructure/config.js";
 import { getAdminToken } from "../../integrations/keycloak/admin-session.js";
 
@@ -66,8 +67,36 @@ export async function listManagedIdentityAccounts(): Promise<Array<{
     : []);
 }
 
+/**
+ * Keycloak's user PUT replaces the whole attribute map, so every
+ * read-modify-write of a user's attributes runs under one Redis lease per
+ * user, across replicas. Otherwise a managed-tenant write and a citizen
+ * registration write for the same person can erase each other.
+ */
+async function withUserAttributeLease<T>(userId: string, operation: () => Promise<T>): Promise<T> {
+  const key = `${config.cachePrefix}:identity:user-attributes-lease:${userId}`;
+  const value = randomUUID();
+  const deadline = Date.now() + 5_000;
+  while (await getRedis().set(key, value, "EX", 30, "NX") !== "OK") {
+    if (Date.now() >= deadline) throw new IdentityAdminError("The Keycloak user is busy; retry", 503);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  try {
+    return await operation();
+  } finally {
+    await getRedis().eval(
+      "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+      1, key, value,
+    );
+  }
+}
+
 /** Durable inventory used to deactivate accounts after Organization removal. */
-export async function recordManagedTenant(userId: string, tenantId: string): Promise<void> {
+export function recordManagedTenant(userId: string, tenantId: string): Promise<void> {
+  return withUserAttributeLease(userId, () => writeManagedTenant(userId, tenantId));
+}
+
+async function writeManagedTenant(userId: string, tenantId: string): Promise<void> {
   const response = await request(`/users/${encodeURIComponent(userId)}`);
   const user = await response.json() as UserRepresentation;
   const tenants = [...new Set([...(user.attributes?.[MANAGED_TENANTS_ATTRIBUTE] || []), tenantId])].sort();
@@ -95,7 +124,14 @@ export async function citizenRegistrationValues(userId: string): Promise<string[
  * registration record, alongside `digit.managedTenants` on the same user.
  * `update` returns the new values, or null to leave the user untouched.
  */
-export async function updateCitizenRegistrationValues(
+export function updateCitizenRegistrationValues(
+  userId: string,
+  update: (values: string[]) => string[] | null,
+): Promise<string[]> {
+  return withUserAttributeLease(userId, () => writeCitizenRegistrationValues(userId, update));
+}
+
+async function writeCitizenRegistrationValues(
   userId: string,
   update: (values: string[]) => string[] | null,
 ): Promise<string[]> {
@@ -367,56 +403,6 @@ export async function readOrganizationMapping(
   }
 }
 
-/**
- * The single enabled Organization mapped to `tenantId`, without listing the
- * realm. Backs the subject-scoped login path. (Dhruv review, #2088.)
- */
-export async function readOrganizationMappingForTenant(
-  tenantId: string,
-): Promise<OrganizationMapping | null> {
-  const matches = await organizationsForTenant(tenantId);
-  if (matches.length > 1) {
-    throw new IdentityAdminError("Multiple Organizations map to this tenant", 409);
-  }
-  return matches[0] ? asMapping(matches[0]) : null;
-}
-
-/** Resolve the public, globally reserved URL slug without treating it as a tenant id. */
-export async function readOrganizationMappingForUrlSlug(
-  urlSlug: string,
-): Promise<OrganizationMapping | null> {
-  const normalized = urlSlug.trim().toLowerCase();
-  const attributeQuery = new URLSearchParams({
-    q: `digit.urlSlug:${normalized}`,
-    briefRepresentation: "false",
-    max: "20",
-  });
-  const aliasQuery = new URLSearchParams({
-    search: normalized,
-    exact: "true",
-    briefRepresentation: "false",
-    max: "20",
-  });
-  const responses = await Promise.all([
-    request(`/organizations?${attributeQuery}`),
-    request(`/organizations?${aliasQuery}`),
-  ]);
-  const organizations = (await Promise.all(
-    responses.map((response) => response.json() as Promise<OrganizationRepresentation[]>),
-  )).flat();
-  const seen = new Set<string>();
-  const matches = organizations.flatMap((organization) => {
-    if (!organization.id || seen.has(organization.id)) return [];
-    seen.add(organization.id);
-    const mapping = asMapping(organization);
-    return mapping?.urlSlug.toLowerCase() === normalized ? [mapping] : [];
-  });
-  if (matches.length > 1) {
-    throw new IdentityAdminError("Multiple Organizations use this URL slug", 409);
-  }
-  return matches[0] || null;
-}
-
 export async function listOrganizationMappings(): Promise<OrganizationMapping[]> {
   const organizations = await paged<OrganizationRepresentation>(
     "/organizations?briefRepresentation=false",
@@ -535,7 +521,10 @@ async function organizationGroupCandidatesForAttribute(
     const organization = asMapping(representation);
     return organization ? [organizationGroupsForAttribute(
       organization.organizationId, name, value,
-    ).then((groups) => groups.map((group) => ({ organization, group })))] : [];
+    ).then((groups) => groups
+      // Never trust the server-side `q` filter alone: re-check the value.
+      .filter((group) => groupAttribute(group, name)?.toLowerCase() === value.toLowerCase())
+      .map((group) => ({ organization, group })))] : [];
   }));
   return candidates.flat();
 }
@@ -570,18 +559,54 @@ export async function listTenantMappings(): Promise<TenantMapping[]> {
       return mapping ? [mapping] : [];
     });
   }))).flat();
-  const mappings: TenantMapping[] = [...organizations, ...groupMappings];
-  const tenants = new Set<string>();
-  const slugs = new Set<string>();
+  return withoutCollisions([...organizations, ...groupMappings]);
+}
+
+/**
+ * A tenant id or URL slug claimed by more than one mapping is ambiguous, so
+ * every mapping involved is dropped (its routes answer "not available") and
+ * logged. The rest of the directory keeps working: one bad record must never
+ * take sign-in down for every tenant.
+ */
+function withoutCollisions(mappings: TenantMapping[]): TenantMapping[] {
+  const count = (key: (mapping: TenantMapping) => string) => {
+    const counts = new Map<string, number>();
+    for (const mapping of mappings) counts.set(key(mapping), (counts.get(key(mapping)) || 0) + 1);
+    return counts;
+  };
+  const tenantCounts = count((mapping) => mapping.tenantId.toLowerCase());
+  const slugCounts = count((mapping) => mapping.urlSlug.toLowerCase());
+  const kept: TenantMapping[] = [];
   for (const mapping of mappings) {
-    const slug = mapping.urlSlug.toLowerCase();
-    if (tenants.has(mapping.tenantId) || slugs.has(slug)) {
-      throw new IdentityAdminError("Tenant directory contains a duplicate tenant or URL slug", 409);
+    if (tenantCounts.get(mapping.tenantId.toLowerCase())! > 1 || slugCounts.get(mapping.urlSlug.toLowerCase())! > 1) {
+      console.warn("Tenant directory: dropping a colliding mapping", JSON.stringify({
+        organizationId: mapping.organizationId,
+        ...(mapping.mappingType === "organization-group" && { groupId: mapping.groupId }),
+        tenantId: mapping.tenantId,
+        urlSlug: mapping.urlSlug,
+      }));
+      continue;
     }
-    tenants.add(mapping.tenantId);
-    slugs.add(slug);
+    kept.push(mapping);
   }
-  return mappings;
+  return kept;
+}
+
+/**
+ * Re-reads a directory mapping from Keycloak before it authorizes anything:
+ * the directory is cached per process for up to a minute, but disabling or
+ * unmapping an Organization (or group) must take effect at the next sign-in.
+ */
+export async function liveTenantMapping(mapping: TenantMapping): Promise<TenantMapping | null> {
+  const organization = await readOrganizationMapping(mapping.organizationId);
+  if (!organization) return null;
+  if (mapping.mappingType === "organization") {
+    return organization.tenantId === mapping.tenantId && organization.urlSlug === mapping.urlSlug
+      ? organization : null;
+  }
+  const group = await readOrganizationGroup(mapping.organizationId, mapping.groupId);
+  const live = group ? asGroupMapping(group, organization) : null;
+  return live && live.tenantId === mapping.tenantId && live.urlSlug === mapping.urlSlug ? live : null;
 }
 
 async function cachedTenantMappings(): Promise<TenantMapping[]> {
@@ -901,15 +926,25 @@ function phoneIdentityUser(user: UserRepresentation, created: boolean): PhoneIde
   return { id: user.id, name: name || "Citizen", created };
 }
 
+/**
+ * Every user whose VERIFIED phone is this number. The query already asks for
+ * verified owners only, and all pages are read, so unverified holders of the
+ * number can never hide the real owner behind a result limit.
+ */
 async function findVerifiedPhoneUsers(phoneNumber: string): Promise<UserRepresentation[]> {
   const query = new URLSearchParams({
-    q: `${PHONE_ATTRIBUTE}:${phoneNumber}`,
+    q: `${PHONE_ATTRIBUTE}:${phoneNumber} ${PHONE_VERIFIED_ATTRIBUTE}:true`,
     briefRepresentation: "false",
-    max: "5",
   });
-  const response = await request(`/users?${query}`);
-  return (await response.json() as UserRepresentation[])
+  return (await paged<UserRepresentation>(`/users?${query}`))
     .filter((user) => verifiedPhoneOwner(user, phoneNumber));
+}
+
+/** False when the Keycloak user is disabled or no longer exists. */
+export async function identityUserEnabled(userId: string): Promise<boolean> {
+  const response = await request(`/users/${encodeURIComponent(userId)}`, {}, [200, 404]);
+  if (response.status === 404) return false;
+  return (await response.json() as UserRepresentation).enabled !== false;
 }
 
 /**
@@ -941,7 +976,22 @@ export async function ensurePhoneIdentityUser(phoneNumber: string): Promise<Phon
     }),
   }, [201, 409]);
   const id = response.headers.get("location")?.split("/").filter(Boolean).pop();
-  if (response.status === 201 && id) return { id, name: "Citizen", created: true };
+  if (response.status === 201 && id) {
+    // Keycloak drops unmanaged attributes silently unless the realm keeps
+    // them. A user without its verified phone would never be found again and
+    // would block every later sign-in for the number, so it is removed and
+    // the misconfiguration is reported instead.
+    const created = await (await request(`/users/${encodeURIComponent(id)}`)).json() as UserRepresentation;
+    if (!verifiedPhoneOwner(created, phoneNumber)) {
+      await request(`/users/${encodeURIComponent(id)}`, { method: "DELETE" }, [204, 404]);
+      console.error(
+        "Keycloak did not store phoneNumber/phoneNumberVerified on a new user. " +
+        "Set the realm's unmanagedAttributePolicy to ADMIN_EDIT (#2193).",
+      );
+      throw new IdentityAdminError("Keycloak did not store the phone attributes", 503);
+    }
+    return { id, name: "Citizen", created: true };
+  }
 
   const query = new URLSearchParams({ username, exact: "true", briefRepresentation: "false" });
   const raced = (await (await request(`/users?${query}`)).json() as UserRepresentation[])
