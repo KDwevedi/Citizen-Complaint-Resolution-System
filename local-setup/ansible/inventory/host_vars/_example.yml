@@ -697,15 +697,22 @@ identity_smtp_user: ""
 identity_smtp_ssl: false
 identity_smtp_starttls: true
 # digit-ui sign-in through Keycloak (#2167): clients digit-ui-employee and
-# digit-ui-citizen, each with its own browser flow and theme.
+# digit-ui-citizen. The employee client has its own browser flow and theme; the
+# citizen client has no Keycloak theme until citizens get a Keycloak sign-in
+# method (phone OTP runs inside digit-ui).
 identity_employee_login_theme: "digit-employee"
-identity_citizen_login_theme: "digit-citizen"
 identity_employee_signin_methods: [password]
 # Citizen sign-in methods (#2189). Unset: [phone_otp] on development boxes
 # (enable_otp_services: false; codes go to the BFF log, see
 # identity_citizen_otp_sender) and [] elsewhere until a real SMS sender exists.
 # identity_citizen_signin_methods: [phone_otp]
 # identity_citizen_otp_sender: log
+# Existing DIGIT roots (e.g. Bomet's `ke`) have no Organization, so no
+# /{root}/digit-ui route. true = the identity BFF creates one per active root
+# at startup, slug = tenant id, idempotent (#2206). Roots default to the admin
+# tenant's root.
+# identity_tenant_route_backfill: true
+# identity_tenant_route_backfill_roots: [ke]
 
 # MUST stay '' (or 'digit'). The deploy REFUSES to run with 'keycloak' here or
 # in citizen_auth_provider / employee_auth_provider.

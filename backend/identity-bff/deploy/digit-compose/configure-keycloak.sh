@@ -21,15 +21,16 @@ readonly FIRST_BROKER_FLOW=digit-first-broker-login
 # (keycloak/theme-src, built by keycloak/Dockerfile.magic-link). Selected per
 # client rather than on the shared realm.
 readonly LOGIN_THEME=${KEYCLOAK_LOGIN_THEME:-configurator-blue}
-# digit-ui sign-in surfaces (CCRS #2167). Each has its own client and
-# Keycloakify theme; all three themes ship in the same theme jar. The employee
-# client has its own browser flow; the citizen client uses the realm's.
+# digit-ui sign-in surfaces (CCRS #2167). Each has its own client. The
+# employee client has its own browser flow and Keycloakify theme; the citizen
+# client uses the realm's flow and sets no theme, because citizens sign in with
+# phone OTP inside digit-ui and never see a Keycloak page. A citizen theme
+# (digit-citizen) comes back with the first Keycloak sign-in method for citizens.
 readonly EMPLOYEE_LOGIN_THEME=${KEYCLOAK_EMPLOYEE_LOGIN_THEME:-digit-employee}
-readonly CITIZEN_LOGIN_THEME=${KEYCLOAK_CITIZEN_LOGIN_THEME:-digit-citizen}
 readonly EMPLOYEE_FLOW=digit-employee-browser
 # Realm-level theme names this deployment set itself and may therefore clear.
 # `digit` is the name earlier revisions used before the theme was renamed.
-readonly OWNED_REALM_THEMES="$LOGIN_THEME digit $EMPLOYEE_LOGIN_THEME $CITIZEN_LOGIN_THEME"
+readonly OWNED_REALM_THEMES="$LOGIN_THEME digit $EMPLOYEE_LOGIN_THEME digit-citizen"
 
 # Standalone installs keep these values in identity-bff.env. Ansible deployments
 # pass them as task-scoped environment variables so no second secrets file has
@@ -214,7 +215,8 @@ configure_employee_flow() {
 # One confidential authorization-code client per digit-ui surface. The BFF is
 # the only party that talks to it (PKCE, its own callback), and binds the
 # client's theme and, when `flow` is set, its browser flow (an empty `flow`
-# clears any override, so the realm's browser flow applies).
+# clears any override, so the realm's browser flow applies; an empty `theme`
+# likewise leaves login_theme absent, clearing an earlier value).
 # `digit.auth.signup.methods` is empty by design (no self-service sign-up).
 # Keycloak does not persist an empty client attribute (the JPA ClientAdapter
 # removes it), so writing "" through the JSON body clears any earlier value and
@@ -249,7 +251,9 @@ configure_digit_ui_client() {
   ensure_mapper "clients/$client_uuid_value" digit-identity-bff-audience oidc-audience-mapper \
     -s "config.\"included.client.audience\"=$BFF_CLIENT" \
     -s 'config."id.token.claim"=false' -s 'config."access.token.claim"=true'
-  printf '%s' "$client_uuid_value"
+  # Returned through a variable, not stdout: inside $(...) bash drops `set -e`,
+  # so a failed kc update above would go unnoticed (review, #2199).
+  DIGIT_UI_CLIENT_UUID=$client_uuid_value
 }
 
 # Keeps every attribute an admin can see (ADMIN_EDIT, instead of silently
@@ -442,11 +446,11 @@ configure_user_profile
 digit_ui_clients=skipped
 if [ -n "${KEYCLOAK_EMPLOYEE_CLIENT_SECRET:-}" ] && [ -n "${KEYCLOAK_CITIZEN_CLIENT_SECRET:-}" ]; then
   configure_employee_flow
-  employee_uuid=$(configure_digit_ui_client "$EMPLOYEE_CLIENT" "$KEYCLOAK_EMPLOYEE_CLIENT_SECRET" \
-    employee "$EMPLOYEE_LOGIN_THEME" "$EMPLOYEE_SIGNIN_METHODS" "$EMPLOYEE_FLOW")
-  kc update "clients/$employee_uuid/optional-client-scopes/$organization_scope" -r "$REALM" -n >/dev/null
+  configure_digit_ui_client "$EMPLOYEE_CLIENT" "$KEYCLOAK_EMPLOYEE_CLIENT_SECRET" \
+    employee "$EMPLOYEE_LOGIN_THEME" "$EMPLOYEE_SIGNIN_METHODS" "$EMPLOYEE_FLOW"
+  kc update "clients/$DIGIT_UI_CLIENT_UUID/optional-client-scopes/$organization_scope" -r "$REALM" -n >/dev/null
   configure_digit_ui_client "$CITIZEN_CLIENT" "$KEYCLOAK_CITIZEN_CLIENT_SECRET" \
-    citizen "$CITIZEN_LOGIN_THEME" "$CITIZEN_SIGNIN_METHODS" '' >/dev/null
+    citizen '' "$CITIZEN_SIGNIN_METHODS" ''
   digit_ui_clients="$EMPLOYEE_CLIENT,$CITIZEN_CLIENT"
 else
   printf 'KEYCLOAK_EMPLOYEE_CLIENT_SECRET / KEYCLOAK_CITIZEN_CLIENT_SECRET unset: digit-ui clients not configured\n' >&2
