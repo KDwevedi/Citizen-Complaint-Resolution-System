@@ -1,6 +1,6 @@
 # Identity BFF: service boundary and completion plan
 
-**Revision:** 6 (2026-10-03). It replaces revisions 1–5. Revisions 4 and 5 were each reviewed by Astra and Fable; all four verdicts were "ready with changes". The review loop closes here: further detail is left to implementation and the §11 gate.
+**Revision:** 6.1 (2026-10-04): revision 6 plus the owner's line comments on fork PR #36. Revision 6 replaced revisions 1–5. Revisions 4 and 5 were each reviewed by Astra and Fable; all four verdicts were "ready with changes". The review loop closes here: further detail is left to implementation and the §11 gate.
 **Inputs:**
 - a 12-agent audit (`_identity-bff-audit-2026-10-01/`);
 - three review rounds:
@@ -21,27 +21,47 @@ The reviews are `review*.md` in the session scratchpad.
 
 **Constraints:**
 - No changes to any egov service.
-- Storage stays in Keycloak attributes plus Redis.
+- Storage stays in Keycloak attributes plus Redis. Every Redis key family must be one of these (each family is tagged in the state schema):
+  - **re-derivable:** rebuilt from Keycloak or DIGIT, e.g. the derived staff credential, or mirrors rebuilt by reconcile;
+  - **restartable:** losing it only means the person or process starts again: sign in again, resend an OTP, resubmit onboarding; leases simply expire;
+  - **documented limit:** citizen tokens and inactive or locked staff tokens can't be revoked once their inventory is lost, and live until expiry (§6).
 - DIGIT3 is a planned reopen (§7).
+- **Test coverage never drops.** The existing integration and e2e specs that sign in through the legacy flows are migrated onto the BFF flows (item 18). No spec is removed without a replacement.
 - Deployment hardening of legacy egov-user endpoints is tracked separately.
 
 ## 1. The boundary
 
-The BFF is a **credential-to-account broker**. It does three things:
+The BFF is a **credential-to-account broker**. In short, it does three things:
 1. It turns a Keycloak sign-in, or a verified citizen phone, into one DIGIT account and its token, for the tenant the URL names.
 2. It keeps that binding, and Keycloak's mirror of DIGIT roles, profile and status, consistent.
 3. It enforces and revokes access.
+
+**Its full set of capabilities:**
+
+| Capability | What the BFF does | Where |
+|---|---|---|
+| Sign up | Configurator founder sign-up (magic link, password setup). The tenant itself is created by PGR's onboarding steps | §5 |
+| Sign in | Keycloak sign-in per surface; citizen phone OTP; picking the tenant from the URL | §1, §8 |
+| Tenant selection | `_select`: the live access check, then a DIGIT token for that tenant | §3, §6 |
+| My signed-in sessions | Show my sessions; sign out this one; sign out everywhere | §6 |
+| Edit my profile | Phone (citizens) and email (staff) through the BFF or Keycloak. Descriptive fields (name, photo, gender…) are edited in the DIGIT profile UI and mirrored | §4, §8 |
+| My credentials and providers | Password, TOTP, remove a second factor, link or unlink Google and similar, with last-method protection | §8 |
+| Workspace members | Admins link, invite, list and remove staff; invitees accept | §5 |
+| DIGIT writes with its own admin credential | Exactly three: set or repair a staff account's derived credential; write identifiers through (phone, email); log out and revoke tokens. It never writes roles, `active`, HR data or MDMS | §4, §6 |
+| Sync | Mirror DIGIT roles, status and profile into Keycloak; write Keycloak identifiers into DIGIT | §4, sync matrix |
+| Revocation | React to Keycloak events, reconcile and logout | §6 |
+| Onboarding primitives | Identity steps that PGR calls during tenant creation | §5 |
 
 | Owner | Owns |
 |---|---|
 | **Keycloak** | Credentials, identity providers, MFA, sign-in flows, the person record, Organization membership |
 | **BFF** | Browser sessions; tenant binding; account bindings; token issuance and revocation; citizen phone OTP; the DIGIT→Keycloak mirror; Keycloak→DIGIT login identifiers |
 | **DIGIT** (egov-user, HRMS) | Roles, employment status, descriptive profile, everything a token is allowed to do |
-| **PGR onboarding** | Saga order, tenant foundation, platform baseline, readiness, retries |
+| **PGR onboarding** | The onboarding steps (§5) and their order, tenant foundation, platform baseline, readiness, retries |
 
 **The BFF never:**
 - writes MDMS, encryption keys or HRMS records;
-- runs saga steps;
+- runs the onboarding steps (the ordered, resumable steps that create a tenant at signup, §5);
 - holds a role catalogue;
 - accepts a **person's** password (it does set the derived DIGIT credential of a bound staff account, §6);
 - knows an SMS or WhatsApp provider;
@@ -144,6 +164,13 @@ These are internal. PGR holds the existing two tokens: introspection for reads, 
      - A repeat never demotes an `active` binding and never resurrects a removed one; a removal leaves a tombstone.
      - An explicit re-invite issues a new `invitationVersion` and invalidates the old one.
 - **`GET /identity/v1/session`** returns `pendingInvitations`. No workspace needs to be selected.
+- **Invitees are never pulled into onboarding.** Owning a tenant and belonging to one are independent. The configurator decides where to send a signed-in person in this order:
+  1. workspaces they are a member of (active binding + membership) → that workspace;
+  2. pending invitations → the accept screen;
+  3. their own signup draft or operation → onboarding status;
+  4. **only if none of these exist** → the signup wizard.
+
+  A new invitee who sets their password from the email lands directly in the inviting workspace (configurator) or its inbox (employee).
 - **`POST /identity/v1/workspace-invitations/_accept {tenantId, invitationVersion}`:**
   - bound to the authenticated subject;
   - grants membership and turns the binding `active`;
@@ -158,7 +185,7 @@ These are internal. PGR holds the existing two tokens: introspection for reads, 
 - the onboarding worker, tenant-foundation and the provisioner credential.
 
 **PGR owns:**
-- **Saga order:** tenant foundation → `PLATFORM_BASELINE` → founder via HRMS → `organizations/_ensure` → `memberships/_ensure` → `bindings/_ensure` → `_lifecycle ACTIVE`.
+- **Onboarding step order:** tenant foundation → `PLATFORM_BASELINE` → founder via HRMS → `organizations/_ensure` → `memberships/_ensure` → `bindings/_ensure` → `_lifecycle ACTIVE`.
 - **Per-record progress and lease fencing.**
 - **`restartNo`** (above).
 - **Lifecycle publication:** PGR records its decision on the operation row with the publication still pending, then replays `_lifecycle` until the BFF acknowledges it. A terminal restart waits until the previous publication is settled. `FAILED` is published only for terminal abandonment, never for a retryable failure.
@@ -218,7 +245,11 @@ This is a one-time, versioned migration.
 
 ## 8. Citizens and self-service
 
-- **Citizen OTP:** the BFF owns phone possession. Delivery goes through one `HttpOtpSender` contract (novu-bridge, #2203); `log` stays as the dev sender.
+- **Citizen OTP:** the BFF owns phone possession: generating, hashing, rate-limiting and checking codes. Delivery goes through one `HttpOtpSender` contract:
+  - the BFF POSTs `{phone, code, purpose, tenantId, locale, expiresIn}` to one configured URL (`IDENTITY_CITIZEN_OTP_SENDER=http` plus its URL), and expects a fixed set of response codes;
+  - the service at that URL (novu-bridge, #2203) picks the provider, template and per-tenant settings, and sends the SMS or WhatsApp;
+  - so a new provider or channel is a novu-bridge change, never a BFF change;
+  - `log` stays as the dev-box sender.
 - **Usernames for phone identities:**
   - new phone identities get an **opaque** username;
   - existing `phone-hash` usernames are left as they are;
@@ -240,6 +271,10 @@ This is a one-time, versioned migration.
     - provider unlinking runs under the per-subject lease against a fresh read of the person's primary methods, so two concurrent removals can't both pass.
   - **Cancellation and errors:** a cancelled or failed action returns to `returnTo` with a stable `code`. Profile actions that would edit DIGIT-mirrored fields are excluded, and #2208 is rescoped to match.
 - **Phone-only citizens:** they edit their profile in DIGIT and change their phone through the BFF.
+- **My signed-in sessions (all personas):**
+  - `GET /session` returns `sessions[]`: surface, created and last seen, and the current one marked;
+  - `POST /identity/v1/logout {scope: "current" | "others" | "all"}` signs out this session, every other one, or everything, and revokes the matching DIGIT tokens;
+  - for people with a Keycloak credential, "others" and "all" also end their Keycloak sessions.
 - **Keycloak account console:** hidden.
 
 ## 9. Where future changes land
@@ -254,7 +289,7 @@ This is a one-time, versioned migration.
 | New OTP channel | Sender endpoint | Same send contract |
 | New self-service action | Realm required action + `digit.auth.account.actions` + theme | A person with a Keycloak credential |
 | New descriptive profile field | DIGIT UI | DIGIT-owned field |
-| New signup field, country or saga step | Configurator + PGR + seed | Not an identity-proof change |
+| New signup field, country or onboarding step | Configurator + PGR + seed | Not an identity-proof change |
 | New login-page string | Theme + localization | — |
 
 Anything outside "holds within" is a new identity capability and a legitimate reopen.
@@ -273,7 +308,7 @@ Anything outside "holds within" is a new identity capability and a legitimate re
 - `control-plane`
 - `operations`
 
-Adapters are extracted only where the items below touch them.
+**No big-bang refactor.** The large files (`organization-service.ts`, 1,581 lines, and `managed-account-service.ts`) are not reorganized up front. When a work item has to change Keycloak or egov-user client code, that code moves into a small client file (e.g. `keycloak/users.ts`, `digit/egov-user.ts`) as part of the same change.
 
 | # | Item | Size |
 |---|---|---|
@@ -281,7 +316,7 @@ Adapters are extracted only where the items below touch them.
 | 1 | Surface registry; remove the `prompt=login` literal | M |
 | 2 | Declared `hosted` method; `oauth`→`idp`; codes, not copy; citizen methods return `[]`, not 503 | S |
 | 3 | `HttpOtpSender` | S |
-| 4 | `action` passthrough with parameters; `account.actions`, credential metadata and linked providers in `/session`; provider `_unlink`; last-method protection (§8) | M |
+| 4 | `action` passthrough with parameters; `account.actions`, credential metadata, linked providers and `sessions[]` in `/session`; provider `_unlink`; last-method protection; `logout {scope}` (§8) | M |
 | 5 | Password-setup email `client_id` per surface (unblocks #2191) | S |
 | 6 | Stable error `code`s on `_select`, `callback`, `auth-results`, including `ACCOUNT_LOCKED`, `ACCOUNT_INACTIVE`, `INVITATION_STALE`, `PENDING_INVITATION` | S |
 | 7 | Derived staff credential (§6) with typed login-failure parsing, the safe DIGIT writer and the `digit.accounts` metadata it needs; delete per-login rotation | M |
@@ -295,6 +330,7 @@ Adapters are extracted only where the items below touch them.
 | 15 | Fixes: session kept on a Keycloak blip; citizen phone memo drift; remove the `admin/admin` fallback; `/readyz` (Redis, JWKS, Keycloak admin token, each surface's catalogue, DIGIT reachability, poller lag); `Cache-Control` on `tenant-contexts`; perf (callback discovery, `syncSubject` full scan, `/tenants` probe) | M |
 | 16 | In-flight PR fixes (#2190, #2201, #2206), excluding code that item 14 deletes | M |
 | 17 | Final docs: `docs/identity-bff.md` + `architecture.md` as the frozen contract | S |
+| 18 | **Test migration:** the 33 specs in `tests/integration-tests` that sign in through legacy flows (the `auth.setup`/`api.setup` fixtures, `utils/auth`, `citizen-login`, `citizen-otp-login`, `admin/login`, `keycloak/kc-*` and others), and `backend/identity-bff/tests`, move onto the BFF flows: employee `/authorize`→`_select`, citizen OTP→`_select`. Afterwards the spec count and pass rate must be ≥ today's | M |
 
 ## 11. Completion gate (executed tests)
 
@@ -302,8 +338,11 @@ Adapters are extracted only where the items below touch them.
 
 **Normal paths:**
 - each persona (configurator founder, configurator admin, employee, Keycloak citizen, phone-only citizen) through sign-in, `_select`, self-service and logout;
-- an admin creates an employee in the configurator, and that employee signs in;
-- an existing user accepts an invite.
+- an admin creates an employee in the configurator, and that employee signs in **and lands in the inviting workspace, never the signup wizard**;
+- an existing user accepts an invite;
+- a person lists their sessions, signs out others, and signs out everywhere.
+
+**Existing coverage:** the migrated legacy-flow specs (item 18) pass, with a spec count no lower than before.
 
 **Failure and recovery:**
 - concurrent HRMS edit during a mirror pass, and during credential setup;
@@ -343,7 +382,7 @@ Adapters are extracted only where the items below touch them.
 ## 12. Outside the BFF (our apps and config only)
 
 - **PGR onboarding:**
-  - saga port, seed, founder via HRMS (validated on a fresh baseline), readiness;
+  - port of the onboarding steps, seed, founder via HRMS (validated on a fresh baseline), readiness;
   - #2169 rescoped to PGR, #2103.
 - **Configurator:**
   - staff create = HRMS `_create` + `_link`;
@@ -351,7 +390,12 @@ Adapters are extracted only where the items below touch them.
   - member list and remove;
   - an account menu: password, TOTP, remove second factor, link and unlink a provider (from `/session` metadata);
   - Logout calls `/identity/v1/logout`;
-  - delete `tenantBootstrap.ts`.
+  - delete `tenantBootstrap.ts`;
+  - routing order for signed-in people (§5): memberships → pending invitations → own draft → signup wizard;
+  - **signup code and slug derivation fix** (`api/onboarding.ts:587-623`, `SignupPage.tsx:296-306,395-400`):
+    - today the account code (which becomes the tenant id) is the country plus the initials of the first three words;
+    - both fields stop updating once "touched", and resuming a draft marks them touched;
+    - the fix: re-derive while the user hasn't typed in the field (a separate user-edited flag), and derive from more than initials, with a collision suffix.
 - **digit-ui:**
   - slug→context cache in `tenantRoute.js`;
   - drop the direct `/user/_logout` call;
@@ -381,7 +425,7 @@ Adapters are extracted only where the items below touch them.
 3. Ops job (a) → item 7 → item 8 → item 9 → item 10, which includes reconcile-based revocation.
 4. Configurator consumers: HRMS→`_link`, the accept screen, member list and remove. digit-ui slug cache and logout. These are **deployed on every box** before anything they replace is deleted.
 5. Item 11 → PGR port, with `restartNo`, lifecycle publication and founder via HRMS validated on a fresh baseline, **deployed on every box** → ops jobs (b) and (c) → item 14 deletions.
-6. Item 12 (sync), item 13 (phone), items 1–4, item 15, item 17. Account-menu and phone-change consumers in our apps.
+6. Item 12 (sync), item 13 (phone), items 1–4, item 15, item 17. Account-menu and phone-change consumers in our apps. Item 18 (test migration) runs alongside steps 3–6, and each legacy spec moves when its flow lands.
 7. Run the §11 gate.
 
 ## 14. Open items
