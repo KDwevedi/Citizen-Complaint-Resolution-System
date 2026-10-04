@@ -173,4 +173,27 @@ Suites skip cleanly without those endpoints; Keycloak-only dry runs use the
 isolated 26.7.3 fixture. Compilation, explicit skips and the Keycloak dry run
 are development evidence, not full-gate evidence. Root runs the full persona
 and non-fixed citizen OTP suites on the 8c dev box at the completion gate.
-O2 remains **pending gate run**, with timing decided by the human.
+The initial run is now recorded by root in
+`_identity-bff-walkthrough/8c-gate-report.md` (2026-10-04/05, source
+`69f9af553`). These are root-reported live outcomes, not owner re-executions:
+
+- O2 non-fixed OTP, phone-only citizen, dependency readiness and business traffic
+  during BFF outage passed. The outage result does not establish expiry recovery.
+- Managed employee API entry passed; its browser helper failed on consent.
+- Founder and linked employee selection failed on credential-role preservation;
+  core fix `a92e9256f` is integrated, but live rerun evidence is still needed.
+- Logout returned the expected session outcomes but invalidated the current
+  shared DIGIT token for `others`. Gate-fix PR 73 contains reviewed consent and
+  shared-token protection plus the required managed-path regression. Evidence:
+  `../evidence/gate-fixes-owner-summary.txt`. The exact live logout cause remains
+  unproven; the duplicate-inventory variant reproduces the symptom in tests.
+- Keycloak citizen was not run because the deployed client offered only
+  phone OTP. Founder readiness/no-403 and other outstanding matrix cases
+  remain open; workarounds in the root report do not count as clean passes.
+
+All assigned source scopes and both gate-fix leaves are implemented and
+owner-reviewed. The original parent task's requirement for every live gate to
+pass is blocked on root-owned deployment, reruns and remaining gate execution.
+No owner/leaf deployment, worker deletion or final legacy-login removal is
+permitted by this status update. The test migration matrix remains a pinned
+pre-run snapshot; use this dated root report for subsequent live outcomes.
