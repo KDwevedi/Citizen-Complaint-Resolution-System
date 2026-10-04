@@ -12,6 +12,7 @@
 | `04-state-schema.md` | Keycloak user, Organization, client and realm state; 23 + 16 Redis key families; session record; PGR DDL; egov-user field map; keys; ER diagram | 700 |
 | `05-use-cases-and-flows.md` | 9 actors, 59 use cases, 7 sequence diagrams (Mermaid), use-case × gate coverage | 1170 |
 | `06-review-history.md` | Revisions 1–6 and five review rounds; how blockers moved from architecture to contract precision | 25 |
+| `07-sync-matrix.md` | Field-by-field Keycloak↔DIGIT sync: 106 fields with owner, direction, trigger and drift handling; adoption, onboarding, operations and offboarding phases; 38 GAPs (28 need BFF code) | 360 |
 
 "PROPOSED" in the files means an agent filled a gap the design leaves open. Those are the things to confirm or override in the session. The diagrams are Mermaid and haven't been rendered yet; open them in a Markdown viewer that renders Mermaid.
 
