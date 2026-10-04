@@ -31,6 +31,8 @@
 
 ## Decisions to make in the session
 
+**Status (rev 7, 2026-10-04):** A7, A8, B1, C2 and C5 are settled. The rest are still open.
+
 Each has context, options and my recommendation (★). Source file and question number are in brackets.
 
 ### A. Data model (blocks item 0)
@@ -58,16 +60,19 @@ Each has context, options and my recommendation (★). Source file and question 
 - ★ Drop `tenantId` from the contract unless you know a case where they differ.
 
 **A7. Mirroring the profile into Keycloak** (`04` Q11/Q12)
+> ✅ **Settled in rev 7:** D17 (whole name → `firstName`, `lastName` empty) and D20 (locale not synced).
 - **Context:** DIGIT has a single `name`; Keycloak has `firstName`/`lastName`. DIGIT locale is `en_IN`, Keycloak's is `en`.
 - ★ Split the name on its last space, and make `lastName` not required in the realm. Leave locale out of v1 unless realm i18n is enabled.
 
 **A8. Sub-tenants** (`04` Q10, `05` Q3)
+> ✅ **Settled in rev 7:** D16, no sub-tenants.
 - **Context:** D15 deletes `tenant-groups/_ensure`, but bindings can be at a city tenant.
 - ★ Membership of the **root** Organization satisfies D10 for any sub-tenant binding, and `_link` accepts a sub-tenant `tenantId`. Keep the read path for existing sub-tenant routes; no new writes.
 
 ### B. API behaviour
 
 **B1. Does an HRMS deactivation revoke live tokens?** (`05` Q1)
+> ✅ **Settled in rev 7:** yes, §6 revocation triggers.
 - **Context:** D4 says DIGIT `active` is one of the two switches, but item 10 only lists Keycloak-side triggers.
 - ★ Yes: reconcile revokes when `active=false`. Add it to item 10 and the gate.
 
@@ -109,6 +114,7 @@ Each has context, options and my recommendation (★). Source file and question 
 - ★ Allowed. Citizen entries are ignored for D12 profile ordering whenever a staff entry exists.
 
 **C2. Defining "unused" for the `kcbff-` clean-out** (`05` Q8)
+> ✅ **Settled in rev 7:** D13, delete all of them.
 - ★ No successful `_select` in the last 30 days, and no complaints or actions under that account. The list goes per box to you before anything is deleted.
 
 **C3. Escalation through HRMS** (`05` Q9)
@@ -119,6 +125,7 @@ Each has context, options and my recommendation (★). Source file and question 
 - ★ Not a condition for BFF §0 completeness, but #2072 is a precondition for **production** citizen sign-in.
 
 **C5. Gate additions** (`05` §4.3)
+> ✅ **Settled in rev 7:** added to §11.
 - ★ Add tests for:
   - expired-token re-select (UC-14);
   - forgot or set password (UC-35);
