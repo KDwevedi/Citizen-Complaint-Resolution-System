@@ -26,7 +26,7 @@ The review loop closed at revision 6. Revisions 4 and 5 were each reviewed by As
   - **re-derivable:** rebuilt from Keycloak or DIGIT;
   - **restartable:** losing it only means someone signs in again, resends an OTP or resubmits onboarding; leases simply expire;
   - **documented limit:** some tokens can't be revoked once their inventory is lost, and live until they expire (§6).
-- DIGIT3 is a planned reopen (§7).
+- DIGIT3 is out of scope.
 - **Test coverage never drops.** The legacy-flow integration and e2e specs are migrated onto the BFF flows (item 18). No spec is removed without a replacement.
 - **Legacy native password paths** (direct egov-user calls, the old change and forgot password screens, the password HRMS sends by SMS) are **tracked separately**. They do not block D10.
 
@@ -86,7 +86,7 @@ The BFF is a **credential-to-account broker**. In short, it does three things:
 | D8 | No egov service changes. Each box is checked for a stock egov-user image; the tables of the `feat/keycloak-identity-exchange` fork, if present, are ignored |
 | D9 | Storage stays in Keycloak attributes + Redis |
 | D10 | Staff sign-in requires an `active` binding AND live Organization membership |
-| D11 | Founders keep `SUPERUSER` for now (O1) |
+| D11 | Founders keep `SUPERUSER` (owner, 2026-10-04) |
 | D12 | The Keycloak profile comes from the person's oldest active **staff** binding, else their citizen account |
 | D13 | Every existing `kcbff-` managed account is deleted, used or not (dev boxes only). No migration path |
 | D14 | Adding an existing Keycloak user to a workspace creates a `pending` binding that they must accept. It expires after a per-tenant period (D22) |
@@ -119,7 +119,7 @@ The BFF is a **credential-to-account broker**. In short, it does three things:
   - **citizen:** the Keycloak user is enabled and holds a verified phone.
 - **Inactive staff** still see the tenant in discovery, with `code: ACCOUNT_INACTIVE`, so they know why and an admin can reactivate them.
 - **Transition until D13 runs:** the D5 check and `_select` resolve the caller as **binding, else managed `kcbff-`**. Item 14 removes the managed branch.
-- **Not served for now (O4):** employees whose HRMS record sits at a city-level tenant.
+- **Parked (§14):** employees whose HRMS record sits at a city-level tenant.
 
 ## 4. Sync module
 
@@ -244,13 +244,9 @@ These are internal. PGR uses a dedicated onboarding token (D25/B6) that can call
   - while the BFF is down, revocation pauses;
   - once Redis is lost, these tokens live until they expire: citizen tokens, inactive or locked staff tokens, and tokens of a Keycloak user deleted in the same window.
 
-## 7. DIGIT3 migration (planned reopen)
+## 7. DIGIT3
 
-This is a one-time, versioned migration.
-- **Prerequisite:** a complete `digit.accounts` mirror with no drift.
-- **Steps:** stop the old writers → drain → compare inventories → reshape into the DIGIT3 grant model → switch authority under a migration epoch → invalidate sessions.
-- **Rollback:** defined before cut-over.
-- **Blocked on:** the DIGIT3 identity and role design (O3).
+Out of scope (owner, 2026-10-04).
 
 ## 8. Citizens and self-service
 
@@ -446,8 +442,5 @@ Anything outside "holds within" is a new identity capability and a legitimate re
 
 ## 14. Open items
 
-- **O1:** `SUPERUSER` for founders. Revisit after checking that every workspace-setup write is granted to `ACCOUNT_ADMIN`, `MDMS_ADMIN`, `LOC_ADMIN` or `GRO`.
-- **O2:** the real non-fixed citizen OTP mint (gate item; timing set by the owner).
-- **O3:** the DIGIT3 identity and role design (blocks §7 only).
-- **O4:** employees whose HRMS record sits at a city-level tenant aren't served by the new identity system; clarify later.
-- **Walkthrough decisions:** all settled (D16, D17, D20, D25, D26).
+- **O2:** citizen phone sign-in has only been tested with the fixed test code. One end-to-end run with a real, randomly generated code (which needs `EGOV_OTP_HOST` corrected) must pass before citizen sign-in counts as done.
+- **Parked, owner to raise with others separately:** employees whose HRMS record sits at a city-level tenant (they aren't served by the new identity system for now).
