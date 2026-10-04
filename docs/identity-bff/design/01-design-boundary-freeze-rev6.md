@@ -1,6 +1,6 @@
 # Identity BFF: service boundary and completion plan
 
-**Revision:** 7 (2026-10-04). Revision 6.1 plus:
+**Revision:** 7.1 (2026-10-04). Revision 7 plus the remaining walkthrough decisions (D25–D26). Revision 7 was revision 6.1 plus:
 - the owner's decisions on the PR #36 comments (`08-decisions-2026-10-04.md`);
 - two checks: the legacy citizen default name, and where tenant names are stored.
 
@@ -100,6 +100,8 @@ The BFF is a **credential-to-account broker**. In short, it does three things:
 | D22 | **Invitation expiry** is a per-tenant MDMS setting the owner edits in the configurator, between 1 hour and 90 days, defaulting to 14 days |
 | D23 | **Removing a member** in the configurator = HRMS deactivate + BFF remove, as one action. Founder replacement does the same |
 | D24 | **Rollout safety:** the flag `IDENTITY_STAFF_CREDENTIAL_MODE=rotate\|derived` is set per box, and `eg_user` + HRMS are snapshotted before the first rollout on each box |
+| D25 | **Decided by design** (walkthrough README; any can be overridden):<br>• **A1** binding state in a `digit.bindings` attribute plus a searchable `digit.boundUuids` index<br>• **A2** one renewable lease per person; lock order: operation → tenant → slug → person → phone → uuid<br>• **A3** token inventory keyed by DIGIT account `(tenantId, uuid)`, plus a per-person index<br>• **A4** `_link` resume key = `sha256(admin, tenantId, uuid, normalized email)`<br>• **A5** `encode_v1` uses HKDF expansion and rejection sampling, with test vectors in item 0<br>• **A6** `organizations/_ensure` drops the separate root-tenant field (always equal to `tenantId`)<br>• **B2** invitees can accept from digit-ui as well as the configurator<br>• **B3** a self password change is matched by the Keycloak event's `sessionId` and `clientId`<br>• **B4** phone step-up and change use the existing `citizen/otp/_send\|_verify` with `purpose: signin \| stepup \| change_phone`<br>• **B5** the error envelope stays `{code, error}`; the existing `DIGIT_ACCOUNT_INACTIVE` name is kept<br>• **B6** PGR gets a dedicated onboarding token that can call only the §5 primitives<br>• **B7** the BFF never returns refresh tokens; the embedded dashboard calls `_select` again on expiry (checked in item 18)<br>• **B8** the founder's credential is set at their first `_select`, not inside the PGR call<br>• **B9** a signup's founder can't change (signups are owned per Keycloak person), so `memberships/_remove` is dropped<br>• **C1** one person may be both a citizen and staff; staff entries win for the profile<br>• **C3** escalation through HRMS role assignment is outside the BFF, and is noted for HRMS role-actions<br>• **C6** a phone-only citizen's tokens can't be revoked after Redis loss (D9 limit) |
+| D26 | **Old paths go when identity is complete:** the tenantless legacy sign-in, digit-ui-v2's citizen login, the legacy native password paths and the legacy identity screens are removed **after** the §11 gate passes, as the final step (§13 step 8, #2072). They are not a precondition for the gate |
 
 ## 3. Account model
 
@@ -151,7 +153,7 @@ Rules:
 
 ## 5. Onboarding primitives for PGR (D2)
 
-These are internal. PGR uses a dedicated onboarding token (B6, pending) that can call only these primitives.
+These are internal. PGR uses a dedicated onboarding token (D25/B6) that can call only these primitives.
 
 | Primitive | Contract |
 |---|---|
@@ -168,7 +170,6 @@ These are internal. PGR uses a dedicated onboarding token (B6, pending) that can
 | `organizations/_ensure {operationId, restartNo, tenantId, slug, name}` | Takes Redis locks on the slug and the tenant id, which keeps both unique. Stores `digit.operationId`, `digit.restartNo` and `digit.operationHash` (over canonical, normalized fields).<br>• Same operationId, restartNo and hash → returns the existing Organization.<br>• Same restartNo, different hash → 409.<br>• Higher restartNo on this operation's Organization in `PROVISIONING` or `FAILED` → re-stamps it and returns it to `PROVISIONING`. A changed slug creates a new Organization and marks the old one `FAILED`.<br>• Another operation holding the slug or tenant id → 409 |
 | `organizations/_lifecycle {operationId, restartNo, state}` | `PROVISIONING → ACTIVE` or `FAILED`, for the current restartNo only. Repeating the recorded transition returns success |
 | `memberships/_ensure {operationId, restartNo, subject, tenantId}` | Organization membership only. Idempotent |
-| `memberships/_remove {operationId, restartNo, subject, tenantId}` | Removes a previous founder's membership and binding, if a restart could ever change the founder (B9, pending) |
 | `bindings/_ensure {operationId, restartNo, subject, tenantId, digitUuid}` | Founder binding, `active` at once. Uuid uniqueness applies. Same key with a different uuid → 409 `BINDING_CONFLICT`. PGR searches HRMS for the founder before `_create` |
 
 **Visibility:** routing, discovery and `_select` show only `ACTIVE` Organizations. **Absent lifecycle = `ACTIVE`**. Disabling an Organization, or marking it `FAILED`, revokes its members' tokens, and so does deactivating the tenant in MDMS.
@@ -212,7 +213,7 @@ These are internal. PGR uses a dedicated onboarding token (B6, pending) that can
 
 - **Staff credential:** derived, never stored.
   - **Encoding:** `password = encode_v1(HMAC(key[keyVersion], "v1" ‖ uuid ‖ tenantId))`, giving 15 characters, one from each required class, which satisfies egov-user's policy.
-  - **Setting it:** it is set **only when a binding becomes `active`** (new-user `_link`, `_accept`, `bindings/_ensure`, or first issuance for converted links), never while `pending`.
+  - **Setting it:** it is set **only when a binding becomes `active`** (new-user `_link`, `_accept`), at the founder's first `_select` (D25/B8), or at first issuance for converted links, never while `pending`.
   - **At activation, logout-once:** the BFF signs in with the new credential, logs out the live token it gets back (which may be the person's existing native DIGIT token), and only then mints the token it hands out.
   - **Failure handling:** the egov-user adapter keeps the OAuth error body and maps it to invalid credentials, locked, inactive or dependency error.
   - **Repair:** at most once per lease, only on "invalid credentials", never when the account is locked or inactive (`ACCOUNT_LOCKED`, `ACCOUNT_INACTIVE`).
@@ -372,6 +373,7 @@ Anything outside "holds within" is a new identity capability and a legitimate re
 - onboarding:
   - slug race; tenant-id race; the same restartNo with a different payload;
   - repeated `ACTIVE`; delayed calls from a lower restartNo;
+  - a terminal restart keeps the same founder (D25/B9);
   - re-opening a `FAILED` Organization; a retried founder with a different uuid;
   - a PGR crash at every boundary, including around lifecycle publication;
 - an existing Organization without a lifecycle attribute stays visible; disabling an Organization revokes its members;
@@ -440,6 +442,7 @@ Anything outside "holds within" is a new identity capability and a legitimate re
 5. Item 11 → the PGR port (including tenant names, invitation-expiry master and citizen lookup fix), **deployed on every box** → delete `kcbff-` accounts (D13) → tenant-route backfill → item 14 deletions → Keycloak group clean-up.
 6. Items 12, 13, 1–4, 15, 17. Item 18 runs alongside steps 3–6, and each legacy spec moves when its flow lands.
 7. Run the §11 gate.
+8. **Remove the old paths (D26):** tenantless legacy sign-in, digit-ui-v2 citizen login, legacy native password paths, legacy identity screens (#2072). Identity is complete only after this step.
 
 ## 14. Open items
 
@@ -447,4 +450,4 @@ Anything outside "holds within" is a new identity capability and a legitimate re
 - **O2:** the real non-fixed citizen OTP mint (gate item; timing set by the owner).
 - **O3:** the DIGIT3 identity and role design (blocks §7 only).
 - **O4:** employees whose HRMS record sits at a city-level tenant aren't served by the new identity system; clarify later.
-- **Walkthrough decisions still open:** README A1–A7, B2–B9, C1, C3–C6. A8, B1 and C2 are settled by D16, D4 and D13.
+- **Walkthrough decisions:** all settled (D16, D17, D20, D25, D26).

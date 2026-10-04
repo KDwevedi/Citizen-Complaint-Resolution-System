@@ -31,7 +31,10 @@
 
 ## Decisions to make in the session
 
-**Status (rev 7, 2026-10-04):** A7, A8, B1, C2 and C5 are settled. The rest are still open.
+**Status (rev 7.1, 2026-10-04): every decision below is settled.**
+- A7, A8, B1, C2 and C5 were settled by the owner's comments (D16, D17, D20, D4, D13).
+- C4 was settled by the owner: old paths are removed once identity is complete (D26).
+- The rest were taken by design with the recommendation (★) shown (D25); any of them can still be overridden.
 
 Each has context, options and my recommendation (★). Source file and question number are in brackets.
 
