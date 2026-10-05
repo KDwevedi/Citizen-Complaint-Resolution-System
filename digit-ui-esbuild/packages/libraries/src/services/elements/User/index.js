@@ -12,7 +12,7 @@ export const UserService = {
     data.append("scope", "read");
     data.append("grant_type", "password");
 
-    let authResponse = await ServiceRequest({
+    const authResponse = await ServiceRequest({
       serviceName: "authenticate",
       url: Urls.Authenticate,
       data,
@@ -22,7 +22,7 @@ export const UserService = {
       },
     });
     const invalidRoles = window?.globalConfigs?.getConfig("INVALIDROLES") || [];
-    if (invalidRoles && invalidRoles.length > 0 && authResponse && authResponse?.UserRequest?.roles?.some((role) => invalidRoles.includes(role.code))) {
+    if (invalidRoles.length > 0 && authResponse?.UserRequest?.roles?.some((role) => invalidRoles.includes(role.code))) {
       throw new Error("ES_ERROR_USER_NOT_PERMITTED");
     }
     return authResponse;
@@ -109,14 +109,6 @@ export const UserService = {
       window.location.replace(`${window.location.origin}${logoutRedirectURL}`);
     }
   },
-  sendOtp: (details, stateCode) =>
-    ServiceRequest({
-      serviceName: "sendOtp",
-      url: Urls.OTP_Send,
-      data: details,
-      auth: false,
-      params: { tenantId: stateCode },
-    }),
   setUser: (data) => {
     return Digit.SessionStorage.set("User", data);
   },
@@ -127,15 +119,6 @@ export const UserService = {
   getExtraRoleDetails: () => {
     return Digit.SessionStorage.get("User")?.extraRoleInfo;
   },
-  registerUser: (details, stateCode) =>
-    ServiceRequest({
-      serviceName: "registerUser",
-      url: Urls.RegisterUser,
-      data: {
-        User: details,
-      },
-      params: { tenantId: stateCode },
-    }),
   updateUser: async (details, stateCode) =>
     ServiceRequest({
       serviceName: "updateUser",
@@ -152,17 +135,6 @@ export const UserService = {
     const { roles } = user.info;
     return roles && Array.isArray(roles) && roles.filter((role) => accessTo.includes(role.code)).length;
   },
-
-  changePassword: (details, stateCode) =>
-    ServiceRequest({
-      serviceName: "changePassword",
-      url: Digit.SessionStorage.get("User")?.info ? Urls.ChangePassword1 : Urls.ChangePassword,
-      data: {
-        ...details,
-      },
-      auth: true,
-      params: { tenantId: stateCode },
-    }),
 
   employeeSearch: (tenantId, filters) => {
     return Request({
