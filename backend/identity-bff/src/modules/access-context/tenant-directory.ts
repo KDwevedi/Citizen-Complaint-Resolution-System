@@ -23,42 +23,21 @@ export type OrganizationMembership = TenantMapping & {
 };
 
 const TENANT_TTL_MS = 300_000;
-/** A tenant missing from a cached root list refetches that list at most this often. */
-const MISS_REFETCH_MS = 5_000;
-type RootTenants = { value: Set<string>; names: Map<string, string>; fetchedAt: number };
-const tenants = new Map<string, RootTenants>();
-const inFlight = new Map<string, Promise<RootTenants>>();
+const tenants = new Map<string, { value: Set<string>; names: Map<string, string>; expiresAt: number }>();
 
 /** Tenant codes present in DIGIT MDMS `tenant.tenants` for the tenant's root. */
 export async function isActiveDigitTenant(tenantId: string, options: { fresh?: boolean } = {}): Promise<boolean> {
-  return (await rootTenants(tenantId, options.fresh)).value.has(tenantId);
+  return (await rootTenants(tenantId.split(".")[0], options.fresh)).value.has(tenantId);
 }
 
 /** The MDMS display name of an active DIGIT tenant, or null. */
 export async function digitTenantName(tenantId: string): Promise<string | null> {
-  return (await rootTenants(tenantId)).names.get(tenantId) ?? null;
+  return (await rootTenants(tenantId.split(".")[0])).names.get(tenantId) ?? null;
 }
 
-/**
- * Each root's list is cached for TENANT_TTL_MS while it contains the tenant.
- * A tenant missing from it may have been provisioned since the root was cached,
- * so it refetches, at most once per MISS_REFETCH_MS per root (#2303). `fresh`
- * also refetches a cached hit; a miss stays rate-limited.
- */
-async function rootTenants(tenantId: string, fresh = false): Promise<RootTenants> {
-  const root = tenantId.split(".")[0];
+async function rootTenants(root: string, fresh = false): Promise<{ value: Set<string>; names: Map<string, string> }> {
   const hit = tenants.get(root);
-  const age = hit ? Date.now() - hit.fetchedAt : Infinity;
-  if (hit && (hit.value.has(tenantId) ? !fresh && age < TENANT_TTL_MS : age < MISS_REFETCH_MS)) return hit;
-  let pending = inFlight.get(root);
-  if (!pending) {
-    pending = fetchRootTenants(root).finally(() => { if (inFlight.get(root) === pending) inFlight.delete(root); });
-    inFlight.set(root, pending);
-  }
-  return pending;
-}
-
-async function fetchRootTenants(root: string): Promise<RootTenants> {
+  if (!fresh && hit && hit.expiresAt > Date.now()) return hit;
   if (!config.digitMdmsSearchUrl) {
     throw new DigitUnavailableError("DIGIT MDMS search is not configured");
   }
@@ -90,23 +69,19 @@ async function fetchRootTenants(root: string): Promise<RootTenants> {
   const value = new Set(list.flatMap((tenant) => tenant.code ? [tenant.code] : []));
   const names = new Map(list.flatMap((tenant) =>
     tenant.code && typeof tenant.name === "string" && tenant.name.trim() ? [[tenant.code, tenant.name.trim()] as const] : []));
-  const entry = { value, names, fetchedAt: Date.now() };
+  const entry = { value, names, expiresAt: Date.now() + TENANT_TTL_MS };
   tenants.set(root, entry);
   return entry;
 }
 
-/**
- * Live memberships for flows, such as onboarding, that mutate Organizations mid-session.
- * `live` also rereads DIGIT tenant activity for the subject's own memberships.
- */
-export async function liveMembershipsForSubject(subject: string, live = false): Promise<OrganizationMembership[]> {
+/** Live memberships for flows, such as onboarding, that mutate Organizations mid-session. */
+export async function liveMembershipsForSubject(subject: string): Promise<OrganizationMembership[]> {
   const memberships = await Promise.all((await listTenantMappings()).map(async (mapping) => {
+    if (!await isActiveDigitTenant(mapping.tenantId)) return null;
     const member = mapping.mappingType === "organization-group"
       ? await isOrganizationGroupMember(mapping.organizationId, mapping.groupId, subject)
       : await isOrganizationMember(mapping.organizationId, subject);
-    // Membership first, so a live read touches MDMS only for the subject's tenants.
-    if (!member || !await isActiveDigitTenant(mapping.tenantId, { fresh: live })) return null;
-    return { ...mapping, roles: [] as string[] };
+    return member ? { ...mapping, roles: [] as string[] } : null;
   }));
   return memberships
     .filter((membership): membership is OrganizationMembership => membership !== null)
@@ -135,5 +110,4 @@ export function tenantOption(
 export function clearTenantCaches(): void {
   clearTenantMappingCache();
   tenants.clear();
-  inFlight.clear();
 }
