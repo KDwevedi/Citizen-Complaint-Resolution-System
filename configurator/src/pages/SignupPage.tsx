@@ -40,6 +40,7 @@ import { Input } from '@/components/ui/input';
 import { Stepper } from '@/components/ui/stepper';
 import { AuthShell } from '@/components/signup/AuthPanel';
 import { useAuthResult } from '@/hooks/useAuthResult';
+import { clearSignOutIncomplete, signOutIncomplete } from '@/lib/session';
 
 const STEPS = [
   { id: 'account', label: 'Account' },
@@ -323,9 +324,11 @@ function SignupFlow() {
   // the spinner back, so they ask for it through `restart`.
   const bootstrap = useCallback(async () => {
     try {
-      const current = await session();
-      if (current.user) setSessionUser({ email: current.user.email, name: current.user.name });
-      if (!current.authenticated) {
+      // The last sign-out here could not end the identity session, so its cookie
+      // may still be live: never resume it without an explicit sign-up/sign-in.
+      const current = signOutIncomplete() ? null : await session();
+      if (current?.user) setSessionUser({ email: current.user.email, name: current.user.name });
+      if (!current?.authenticated) {
         const { methods: available } = await authMethods('signup');
         setMethods(available);
         setPhase('signedOut');
@@ -542,6 +545,7 @@ function SignupFlow() {
     setSaving(true);
     setError(null);
     try {
+      clearSignOutIncomplete();
       await requestMagicLinkSignup({
         firstName: signupFirstName.trim(),
         lastName: signupLastName.trim(),
@@ -747,7 +751,7 @@ function SignupFlow() {
                     key={method.id}
                     variant="outline"
                     className="w-full"
-                    onClick={() => startSignIn(method.id, 'signup')}
+                    onClick={() => { clearSignOutIncomplete(); startSignIn(method.id, 'signup'); }}
                   >
                     <SignupMethodIcon method={method} />
                     {method.label}
@@ -1150,7 +1154,7 @@ function SignupFlow() {
                 checking={slugChecking}
                 invalidReason={
                   urlSlug && !slugValid
-                    ? '2 to 63 characters, lowercase letters, digits and hyphens, with at least two letters.'
+                    ? '2 to 63 characters, lowercase letters, digits and hyphens, starting with a letter or digit, with at least two letters, and not a reserved word.'
                     : undefined
                 }
               />

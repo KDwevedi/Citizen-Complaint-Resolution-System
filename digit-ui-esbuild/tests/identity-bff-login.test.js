@@ -356,9 +356,10 @@ test("logout redirect targets the tenant's login page for the surface", () => {
   assert.equal(identityBffLogoutRedirect(TENANT.appBasePath, "employee"), "/bomet-county/digit-ui/employee/user/login");
 });
 
-const withBrowser = async (pathname, surface, fn) => {
+const withBrowser = async (pathname, surface, fn, preset = {}) => {
   const calls = [];
   const cleared = [];
+  const flags = new Map(Object.entries(preset));
   let replacedWith = null;
   global.window = {
     location: {
@@ -373,19 +374,20 @@ const withBrowser = async (pathname, surface, fn) => {
       calls.push({ url, init, body: JSON.parse(init.body) });
       return json(204, null);
     },
-    localStorage: { clear: () => cleared.push("local") },
+    // The flag lives in localStorage so a new tab or window sees it too.
+    localStorage: { clear: () => { cleared.push("local"); flags.clear(); }, setItem: (k, v) => flags.set(k, v), getItem: (k) => (flags.has(k) ? flags.get(k) : null) },
     sessionStorage: { clear: () => cleared.push("session") },
   };
   try {
     await fn();
-    return { calls, cleared, replacedWith };
+    return { calls, cleared, replacedWith, flags };
   } finally {
     delete global.window;
   }
 };
 
 test("UserService.logout on a citizen tenant route posts surface=citizen and lands on citizen login", async () => {
-  const { calls, cleared, replacedWith } = await withBrowser(
+  const { calls, cleared, replacedWith, flags } = await withBrowser(
     "/bomet-county/digit-ui/citizen/pgr/complaints", "citizen", () => UserService.logout(),
   );
   assert.equal(calls.length, 1);
@@ -395,6 +397,7 @@ test("UserService.logout on a citizen tenant route posts surface=citizen and lan
   assert.deepEqual(calls[0].body, { surface: "citizen", scope: "current" });
   assert.deepEqual(cleared.sort(), ["local", "session"]);
   assert.equal(replacedWith, "https://example.test/bomet-county/digit-ui/citizen/login");
+  assert.equal(flags.size, 0);
 });
 
 test("UserService.logout on an employee tenant route posts surface=employee and lands on employee login", async () => {
@@ -459,25 +462,40 @@ test("BFF logout does not call native token revocation even with a stored user",
 test("failed BFF sign-out of this device still clears local credentials and leaves", async () => {
   for (const response of [json(503, {}), json(403, { code: "UNTRUSTED_ORIGIN" })]) {
     for (const scope of ["current", "all"]) {
-      const { cleared, replacedWith } = await withBrowser(
+      const { cleared, replacedWith, flags } = await withBrowser(
         "/bomet-county/digit-ui/employee/pgr/inbox", "employee", async () => {
           window.fetch = async () => response;
-          await UserService.logout(scope);
+          // "Sign out everywhere" reports the failure rather than leaving as if it worked.
+          if (scope === "all") await assert.rejects(UserService.logout(scope));
+          else await UserService.logout(scope);
         },
       );
       assert.deepEqual(cleared.sort(), ["local", "session"]);
-      assert.equal(replacedWith, "https://example.test/bomet-county/digit-ui/employee/user/login");
+      // The BFF cookie survived, so the login page must not auto-establish it.
+      assert.equal(flags.get("identityBff.signOutIncomplete"), "1");
+      assert.equal(replacedWith, scope === "all" ? null : "https://example.test/bomet-county/digit-ui/employee/user/login");
     }
   }
 });
 
+test("digit-ui sign-out keeps the Configurator's unconfirmed sign-out flag on the shared origin", async () => {
+  const { cleared, flags } = await withBrowser(
+    "/bomet-county/digit-ui/employee/pgr/inbox", "employee", () => UserService.logout(),
+    { "crs-sign-out-incomplete": "1", "Employee.token": "old" },
+  );
+  assert.deepEqual(cleared.sort(), ["local", "session"]);
+  assert.equal(flags.get("crs-sign-out-incomplete"), "1");
+  assert.equal(flags.has("Employee.token"), false);
+});
+
 test("an unreachable BFF does not keep the device signed in", async () => {
-  const { cleared, replacedWith } = await withBrowser(
+  const { cleared, replacedWith, flags } = await withBrowser(
     "/bomet-county/digit-ui/citizen/pgr/complaints", "citizen", async () => {
       window.fetch = async () => { throw new TypeError("Failed to fetch"); };
       await UserService.logout();
     },
   );
+  assert.equal(flags.get("identityBff.signOutIncomplete"), "1");
   assert.deepEqual(cleared.sort(), ["local", "session"]);
   assert.equal(replacedWith, "https://example.test/bomet-county/digit-ui/citizen/login");
 });

@@ -18,7 +18,7 @@ import { AuthShell } from '@/components/signup/AuthPanel';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { SESSION_EXPIRED_KEY, signOutThisDevice } from '@/lib/session';
+import { SESSION_EXPIRED_KEY, clearSignOutIncomplete, signOutIncomplete, signOutThisDevice } from '@/lib/session';
 import { useAuthResult } from '@/hooks/useAuthResult';
 
 type Phase = 'loading' | 'methods' | 'tenants' | 'noAccess' | 'invitations' | 'entering';
@@ -51,11 +51,16 @@ export default function LoginPage() {
   );
   const [email, setEmail] = useState('');
   const [sending, setSending] = useState(false);
+  const [incompleteSignOut, setIncompleteSignOut] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const current = await session();
-      if (current.authenticated && current.user) {
+      // The last sign-out in this tab could not end the identity session, so
+      // its cookie may still be live: never resume it without an explicit sign-in.
+      const incomplete = signOutIncomplete();
+      setIncompleteSignOut(incomplete);
+      const current = incomplete ? null : await session();
+      if (current?.authenticated && current.user) {
         setIdentityUser(current.user);
         const available = await tenants();
         setTenantOptions(available.tenants);
@@ -126,6 +131,11 @@ export default function LoginPage() {
     } finally {
       setSending(false);
     }
+  };
+
+  const signIn = (methodId: string) => {
+    clearSignOutIncomplete();
+    startSignIn(methodId, 'signin');
   };
 
   const signOut = async () => {
@@ -257,10 +267,20 @@ export default function LoginPage() {
           </p>
         </div>
 
+        {incompleteSignOut && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Sign-out may be incomplete</AlertTitle>
+            <AlertDescription>
+              Close the browser or try again.
+              <Button variant="link" className="h-auto p-0" onClick={() => void signOut()}>Try signing out again</Button>
+            </AlertDescription>
+          </Alert>
+        )}
         {banner}
 
         {hostedSignIn ? (
-          <Button className="h-11 w-full" onClick={() => startSignIn(hostedSignIn.id, 'signin')}>
+          <Button className="h-11 w-full" onClick={() => signIn(hostedSignIn.id)}>
             Log in
             <ArrowRight data-icon="inline-end" />
           </Button>

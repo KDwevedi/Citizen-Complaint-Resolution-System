@@ -17,6 +17,11 @@ import java.nio.charset.StandardCharsets;
 /** Internal DIGIT service calls. Credentials and tokens never enter persisted saga data. */
 @Component
 public class OnboardingProvisionerClient {
+    /**
+     * egov-user refused the provisioner's login (HTTP 400/401: a wrong password, a locked account or a
+     * wrong OAuth client). Retrying cannot fix it and each retry counts toward egov-user's lockout.
+     */
+    public static final String CREDENTIALS_REJECTED = "PROVISIONER_CREDENTIALS_REJECTED";
     private final RestTemplate http;
     private final ObjectMapper mapper;
     private final Environment env;
@@ -24,6 +29,8 @@ public class OnboardingProvisionerClient {
     private final PlatformBaseline baselinePacks;
     private Map<String, Object> login;
     private long expiresAt;
+    /** Set by the first successful login: a later 400/401 then means the password really changed. */
+    private volatile boolean loggedInOnce;
 
     public OnboardingProvisionerClient(RestTemplate shared, ObjectMapper mapper, Environment env) {
         var factory = new SimpleClientHttpRequestFactory();
@@ -57,10 +64,14 @@ public class OnboardingProvisionerClient {
                     env.getProperty("pgr.onboarding.provisioner.client-secret", ""));
             try {
                 login = http.postForObject(base("user") + "/user/oauth/token", new HttpEntity<>(form, headers), Map.class);
+            } catch (RestClientResponseException e) {
+                int status = e.getStatusCode().value();
+                throw new OnboardingFailure(status == 400 || status == 401 ? CREDENTIALS_REJECTED : "PROVISIONER_UNAVAILABLE", true);
             } catch (RestClientException e) { throw new OnboardingFailure("PROVISIONER_UNAVAILABLE", true); }
             if (login == null || login.get("access_token") == null || !(login.get("UserRequest") instanceof Map))
                 throw new OnboardingFailure("PROVISIONER_UNAVAILABLE", true);
             expiresAt = System.currentTimeMillis() + 60000;
+            loggedInOnce = true;
         }
         return Map.of("apiId", "pgr-onboarding", "authToken", login.get("access_token"),
                 "userInfo", login.get("UserRequest"), "ts", System.currentTimeMillis());
@@ -103,6 +114,9 @@ public class OnboardingProvisionerClient {
      * cannot log in as an active EMPLOYEE of its root tenant holding the onboarding admin roles.
      */
     public void verifyReady() { verifiedWriteInfo(); }
+
+    /** Whether these credentials have ever logged in since pgr-services started. */
+    public boolean hasLoggedIn() { return loggedInOnce; }
 
     private Map<String,Object> verifiedWriteInfo() {
         String root = env.getProperty("pgr.onboarding.provisioner.tenant-id", "");
