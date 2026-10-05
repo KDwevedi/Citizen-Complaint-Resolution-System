@@ -465,20 +465,23 @@ want soon:
 - `enable_novu` — SMS, email and WhatsApp notifications. Eight more containers.
   There is a turn-key installer, `scripts/enable-notifications.sh`, rather than
   just the flag.
-- `enable_keycloak` — single sign-on. DIGIT's own OTP login works without it.
-  It also turns on self-service tenant onboarding: PGR's onboarding runner
-  (`pgr_onboarding_runner_enabled`, default `true`, rendered on only with
-  Keycloak) provisions each signup as a platform provisioner account. The
-  deploy creates that account if absent (`PGR_PROVISIONER` on `state_root`,
-  with MDMS_ADMIN, ACCOUNT_ADMIN, LOC_ADMIN and HRMS_ADMIN there), keeps its
-  generated password in OpenBao as `pgr_digit_provisioner_password`, and fails
-  with the fix if an existing account of that name cannot sign in with those
-  roles. If PGR still cannot use it, the runner pauses and logs
-  `PGR onboarding runner PAUSED (<reason>)`; signups wait in the queue and
-  resume once it is fixed. It re-checks with backoff (30 s up to 15 min), but
-  a refused password (`PROVISIONER_CREDENTIALS_REJECTED`) only every 6 hours,
-  since each failed login counts toward egov-user's lockout (5 in 30 minutes):
-  fix the password and restart pgr-services.
+- `enable_keycloak` — Keycloak and the Identity BFF. **Not optional any more:**
+  every employee and citizen sign-in goes through them, the old DIGIT
+  OTP/password login pages are gone, and the deploy refuses `false`. The
+  shipped examples set it to `true`. It also turns on self-service tenant
+  onboarding: PGR's onboarding runner (`pgr_onboarding_runner_enabled`,
+  default `true`, rendered on only with Keycloak) provisions each signup as a
+  platform provisioner account. The deploy creates that account if absent
+  (`PGR_PROVISIONER` on `state_root`, with MDMS_ADMIN, ACCOUNT_ADMIN,
+  LOC_ADMIN and HRMS_ADMIN there), keeps its generated password in OpenBao as
+  `pgr_digit_provisioner_password`, and fails with the fix if an existing
+  account of that name cannot sign in with those roles. If PGR still cannot
+  use it, the runner pauses and logs `PGR onboarding runner PAUSED (<reason>)`;
+  signups wait in the queue and resume once it is fixed. It re-checks with
+  backoff (30 s up to 15 min), but a refused password
+  (`PROVISIONER_CREDENTIALS_REJECTED`) only every 6 hours, since each failed
+  login counts toward egov-user's lockout (5 in 30 minutes): fix the password
+  and restart pgr-services.
 - `enable_otp_services` — real SMS one-time passwords. With it off, citizen
   OTP login works only if you also set `identity_dev_fixed_otp: true`
   (development only: the OTP is then always `123456`). Both are off by default.
