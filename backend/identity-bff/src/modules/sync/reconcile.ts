@@ -1,7 +1,7 @@
 import { config } from "../../infrastructure/config.js";
 import { acquireRedisLease, getRedis } from "../../infrastructure/redis.js";
 import { withPersonLease, LeaseLostError } from "../accounts/person-lease.js";
-import { readBindings } from "../bindings/store.js";
+import { indexBindingTenants, readBindings } from "../bindings/store.js";
 import { revokeAccount, revokePerson, revokeTenantMembers } from "../revocation/index.js";
 import { readOrganizationByTenant, listOrganizationTenants } from "../onboarding/organization-reader.js";
 import { request, isOrganizationMember, IdentityAdminError } from "../organizations/organization-service.js";
@@ -133,6 +133,8 @@ export async function runReconcile(): Promise<ReconcileResult> {
           try {
             await assertHeld();
             await withPersonLease(subject, async lease => {
+              // Keycloak only, so it runs before (and despite) the DIGIT reads below.
+              await indexBindingTenants(subject);
               // The store persists pending expiry under the established lock order.
               const bindings = await readBindings(subject);
               const snapshot = await readMirrorSnapshot(subject);

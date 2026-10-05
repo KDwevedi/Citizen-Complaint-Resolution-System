@@ -48,8 +48,20 @@ async function writeBinding(subject: string, binding: Binding): Promise<void> {
       "digit.bindings": [JSON.stringify({ v: 1, bindings: records })],
       "digit.boundUuids": records.filter((b) => effectiveBinding(b).state !== "removed")
         .map((b) => `${b.tenantId}|${b.uuid}`).sort(),
+      "digit.bindingTenants": bindingTenants(records),
     } };
   });
+}
+
+const bindingTenants = (records: Binding[]) => records.map((b) => b.tenantId).sort();
+
+const indexed = (user: BindingUser) =>
+  bindingTenants(bindingsFromUser(user)).join() === [...user.attributes?.["digit.bindingTenants"] ?? []].sort().join();
+
+/** Backfills the tenant index for records written before it existed. Caller holds the person lease. */
+export async function indexBindingTenants(subject: string): Promise<void> {
+  await updateKeycloakUser(subject, (user) => indexed(user) ? null
+    : { ...user, attributes: { ...user.attributes, "digit.bindingTenants": bindingTenants(bindingsFromUser(user)) } });
 }
 
 /** Expiry is a durable transition, serialized with acceptance and re-invite. */
@@ -99,7 +111,7 @@ export async function bindingsFor(tenantId: string): Promise<Array<{ subject: st
   return result;
 }
 
-type BindingInput = { subject: string; tenantId: string; uuid: string; actor: BindingActor };
+type BindingInput = { subject: string; tenantId: string; uuid: string; actor: BindingActor; email?: string };
 
 async function create(input: BindingInput, pending?: { expiresAt: number; reinvite?: boolean }): Promise<{ binding: Binding; created: boolean }> {
   return withPersonLease(input.subject, async (lease) => withUuidLock(input.tenantId, input.uuid, async (lock) => {
@@ -122,7 +134,7 @@ async function create(input: BindingInput, pending?: { expiresAt: number; reinvi
     }
     const now = Date.now();
     const binding: Binding = {
-      tenantId: input.tenantId, uuid: input.uuid, state: pending ? "pending" : "active",
+      tenantId: input.tenantId, uuid: input.uuid, ...(input.email && { email: input.email }), state: pending ? "pending" : "active",
       invitationVersion: old ? old.invitationVersion + 1 : 1, createdAt: now,
       createdBy: input.actor.kind === "migration" ? { kind: "conversion" } : input.actor,
       ...(pending ? { expiresAt: pending.expiresAt } : { boundAt: now }),
