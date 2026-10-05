@@ -13,7 +13,6 @@ import { LocationService } from "./services/elements/Location";
 import { LocalityService } from "./services/elements/Localities";
 import { CustomService } from "./services/elements/CustomService";
 import { LocalizationService } from "./services/elements/Localization/service";
-import { LoginService } from "./services/elements/Login";
 import { PGRService } from "./services/elements/PGR";
 import { PaymentService } from "./services/elements/Payment";
 import * as dateUtils from "./services/atoms/Utils/Date";
@@ -69,7 +68,6 @@ const initLibraries = () => {
   setupLibraries("LocationService", LocationService);
   setupLibraries("CustomService",CustomService)
   setupLibraries("LocalityService", LocalityService);
-  setupLibraries("LoginService", LoginService);
   setupLibraries("LocalizationService", LocalizationService);
   setupLibraries("PGRService", PGRService);
   setupLibraries("HRMSService", HrmsService);
