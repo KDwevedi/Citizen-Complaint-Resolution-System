@@ -29,6 +29,8 @@ import static org.mockito.Mockito.*;
 public class AnalyticsServiceRecordCountTest {
 
     private static final int STATE_LEN = 1;   // "ke" is state root; "ke.bomet" is a city
+    private static final String STATE_SQL =
+            "SELECT count(*) FROM complaint_facts WHERE (tenant_id = ? OR tenant_id LIKE ?)";
 
     @Mock private JdbcTemplate jdbc;
 
@@ -45,13 +47,13 @@ public class AnalyticsServiceRecordCountTest {
     @Test
     public void stateLevelTenantCoversItsSubtreeButNotASiblingRoot() {
         // a bare 'ke%' would also count every row of the unrelated root tenant 'kenya'
-        when(jdbc.queryForObject(eq(AnalyticsService.STATE_RECORD_COUNT_SQL), eq(Long.class), eq("ke"), eq("ke.%")))
+        when(jdbc.queryForObject(eq(STATE_SQL), eq(Long.class), eq("ke"), eq("ke.%")))
                 .thenReturn(1234L);
 
         assertEquals(1234L, service.recordCount("ke", STATE_LEN));
 
         verify(jdbc).queryForObject(
-                eq(AnalyticsService.STATE_RECORD_COUNT_SQL), eq(Long.class), eq("ke"), eq("ke.%"));
+                eq(STATE_SQL), eq(Long.class), eq("ke"), eq("ke.%"));
     }
 
     @Test
@@ -68,7 +70,7 @@ public class AnalyticsServiceRecordCountTest {
 
     @Test
     public void stateLevelRecordCountEscapesLikeMetacharacters() {
-        when(jdbc.queryForObject(eq(AnalyticsService.STATE_RECORD_COUNT_SQL), eq(Long.class),
+        when(jdbc.queryForObject(eq(STATE_SQL), eq(Long.class),
                 eq("ke%_\\root"), eq("ke\\%\\_\\\\root.%")))
                 .thenReturn(9L);
 
@@ -118,7 +120,7 @@ public class AnalyticsServiceRecordCountTest {
 
     @Test
     public void cacheIsKeyedByTenant() {
-        when(jdbc.queryForObject(eq(AnalyticsService.STATE_RECORD_COUNT_SQL), eq(Long.class), eq("ke"), eq("ke.%"))).thenReturn(100L);
+        when(jdbc.queryForObject(eq(STATE_SQL), eq(Long.class), eq("ke"), eq("ke.%"))).thenReturn(100L);
         when(jdbc.queryForObject(contains("tenant_id = ?"), eq(Long.class), eq("ke.bomet"))).thenReturn(7L);
 
         assertEquals(100L, service.recordCount("ke", STATE_LEN));

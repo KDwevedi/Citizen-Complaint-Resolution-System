@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.egov.pgr.analytics.AnalyticsCatalog.Grain;
 import org.egov.pgr.policy.PgrSearchScope;
 import org.egov.pgr.util.SqlLike;
+import org.egov.pgr.util.TenantSubtree;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -343,15 +344,9 @@ public class AnalyticsPlanner {
      */
     private void applyScope(PgrSearchScope scope, Grain g, List<String> conj, List<Object> params){
         if (scope.tenantId != null) {
-            if (scope.tenantStateLevel) {
-                // The tenant itself, plus everything under a '.' beneath it. A bare prefix LIKE
-                // also matches a sibling whose id merely starts the same way — `ke` matching
-                // `kenya` — which is a cross-tenant read.
-                conj.add("(" + g.tenantColumn + " = ? OR " + g.tenantColumn + " LIKE ?)");
-                params.add(scope.tenantId);
-                params.add(SqlLike.escape(scope.tenantId) + ".%");
-            }
-            else { conj.add(g.tenantColumn + " = ?"); params.add(scope.tenantId); }
+            // State level: the tenant plus its '.'-delimited subtree, never a sibling sharing a
+            // character prefix (`ke` must not match `kenya`). See TenantSubtree.
+            conj.add(TenantSubtree.predicate(g.tenantColumn, scope.tenantId, scope.tenantStateLevel, params));
         }
 
         if (scope.citizenUuid != null) {

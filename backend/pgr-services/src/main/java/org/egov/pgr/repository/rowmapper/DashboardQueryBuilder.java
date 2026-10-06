@@ -1,7 +1,7 @@
 package org.egov.pgr.repository.rowmapper;
 
 import org.egov.pgr.config.PGRConfiguration;
-import org.egov.pgr.util.SqlLike;
+import org.egov.pgr.util.TenantSubtree;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 
@@ -183,25 +183,13 @@ public class DashboardQueryBuilder {
     }
 
     /**
-     * Appends the tenant filter: a state-level id covers its subtree, a city-level id matches
-     * exactly.
-     *
-     * <p>The subtree is the tenant ITSELF plus everything under a '.' beneath it. A bare
-     * {@code LIKE value || '%'} also matches a sibling whose id merely starts with the same
-     * characters — state {@code ke} would aggregate every complaint belonging to the unrelated
-     * root tenant {@code kenya} — so the delimiter has to be part of the pattern. LIKE
-     * metacharacters are escaped for the same reason: unescaped, {@code _} matches any character.
+     * Appends the tenant filter: a state-level id covers its '.'-delimited subtree (never a
+     * sibling root sharing a character prefix — state {@code ke} must not aggregate
+     * {@code kenya}), a city-level id matches exactly. See {@link TenantSubtree}.
      */
     private void appendTenantFilter(StringBuilder sb, String column, String tenantId, List<Object> preparedStmtList) {
-        String[] chunks = tenantId.split("\\.");
-        if (chunks.length == config.getStateLevelTenantIdLength()) {
-            sb.append("(").append(column).append(" = ? OR ").append(column).append(" LIKE ?)");
-            preparedStmtList.add(tenantId);
-            preparedStmtList.add(SqlLike.escape(tenantId) + ".%");
-        } else {
-            sb.append(column).append(" = ?");
-            preparedStmtList.add(tenantId);
-        }
+        boolean stateLevel = tenantId.split("\\.").length == config.getStateLevelTenantIdLength();
+        sb.append(TenantSubtree.predicate(column, tenantId, stateLevel, preparedStmtList));
     }
 
     private void appendDateFilter(StringBuilder sb, Long fromDate, Long toDate, List<Object> preparedStmtList) {
