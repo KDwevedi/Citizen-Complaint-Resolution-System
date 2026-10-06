@@ -103,8 +103,14 @@ public class PGRQueryBuilder {
                 // pattern '%' and match every row of every tenant; it now binds '' and '.%',
                 // which match nothing.
                 boolean stateLevel = tenantIdChunks.length == config.getStateLevelTenantIdLength();
-                addClauseIfRequired(preparedStmtList, builder);
-                builder.append(" ").append(TenantSubtree.predicate("ser.tenantid", tenantId, stateLevel, preparedStmtList)).append(" ");
+                // applyScope already emits this exact predicate when the scope was authorized
+                // against the same tenant at the same level, so don't write it twice.
+                boolean scopeEnforcesIt = scope != null && scope != PgrSearchScope.UNRESTRICTED
+                        && tenantId.equals(scope.tenantId) && scope.tenantStateLevel == stateLevel;
+                if (!scopeEnforcesIt) {
+                    addClauseIfRequired(preparedStmtList, builder);
+                    builder.append(" ").append(TenantSubtree.predicate("ser.tenantid", tenantId, stateLevel, preparedStmtList)).append(" ");
+                }
             }
         }
         Set<String> serviceCodes = criteria.getServiceCode();

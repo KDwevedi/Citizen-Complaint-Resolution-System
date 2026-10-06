@@ -78,6 +78,40 @@ class PGRQueryBuilderTest {
     }
 
     @Test
+    void aScopedSearchCarriesTheTenantPredicateOnce() {
+        RequestSearchCriteria criteria = RequestSearchCriteria.builder().tenantId("pg").build();
+        List<Object> search = new ArrayList<>();
+        List<Object> count = new ArrayList<>();
+        PgrSearchScope scope = new PgrSearchScope("pg", true, null, null, null);
+
+        String query = queryBuilder.getPGRSearchQuery(criteria, search, null, scope);
+        String countQuery = queryBuilder.getCountQuery(criteria, count, null, scope);
+
+        for (String q : List.of(query, countQuery)) {
+            assertEquals(1, q.split("ser\\.tenantId = \\? OR", -1).length - 1, q);
+            assertFalse(q.contains("ser.tenantid = ?"), q);
+        }
+        assertEquals(1, search.stream().filter("pg.%"::equals).count());
+        assertEquals(1, count.stream().filter("pg.%"::equals).count());
+        assertEquals(query.chars().filter(c -> c == '?').count(), search.size());
+    }
+
+    @Test
+    void aCriteriaTenantNarrowerThanTheScopeIsStillApplied() {
+        // The scope covers the state; the criteria narrows to one city. Both predicates stay.
+        RequestSearchCriteria criteria = RequestSearchCriteria.builder().tenantId("pg.city").build();
+        List<Object> preparedStmtList = new ArrayList<>();
+        PgrSearchScope scope = new PgrSearchScope("pg", true, null, null, null);
+
+        String query = queryBuilder.getPGRSearchQuery(criteria, preparedStmtList, null, scope);
+
+        assertTrue(query.contains("ser.tenantid = ?"), query);
+        assertTrue(query.contains("(ser.tenantId = ? OR ser.tenantId LIKE ?)"), query);
+        assertTrue(preparedStmtList.contains("pg.city"));
+        assertTrue(preparedStmtList.contains("pg.%"));
+    }
+
+    @Test
     void aSiblingTenantIsNotInsideTheSubtree() {
         // pg.foo must not read pg.foobar. The two ids share a prefix and nothing else.
         RequestSearchCriteria criteria = RequestSearchCriteria.builder().tenantId("pg.foo").build();
@@ -218,7 +252,7 @@ class PGRQueryBuilderTest {
         String flat = query.replaceAll("\\s+", " ");
 
         // tenant stays ANDed outside the OR; dept AND jurisdiction are grouped, then OR own-assigned
-        assertTrue(flat.contains("AND ser.tenantId = ? AND ( ( 1 = 1 AND ser.additionaldetails->>'department' IN ( ? ) AND ads.locality IN ( ? ) ) OR ser.serviceRequestId IN ( ? ) )"),
+        assertTrue(flat.contains("ser.tenantId = ? AND ( ( 1 = 1 AND ser.additionaldetails->>'department' IN ( ? ) AND ads.locality IN ( ? ) ) OR ser.serviceRequestId IN ( ? ) )"),
                 flat);
         assertTrue(preparedStmtList.contains("PGR-ASSIGNED"));
         assertTrue(preparedStmtList.contains("WT_WARD_A"));
