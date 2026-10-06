@@ -3,6 +3,7 @@ package org.egov.pgr.analytics;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.egov.pgr.analytics.AnalyticsCatalog.Grain;
 import org.egov.pgr.policy.PgrSearchScope;
+import org.egov.pgr.util.SqlLike;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -233,7 +234,7 @@ public class AnalyticsPlanner {
             if ("starts_with".equals(op)) {
                 if (!prefixFilterable) throw new IllegalArgumentException(
                         "op_not_allowed: 'starts_with' is only permitted on prefix-filterable path columns, not '" + colKey + "' on " + g.name);
-                params.add(escapeLike(v.asText()));
+                params.add(SqlLike.escape(v.asText()));
                 parts.add(colKey + " LIKE ? || '%'");
                 continue;
             }
@@ -247,7 +248,7 @@ public class AnalyticsPlanner {
                 if (!prefixFilterable) throw new IllegalArgumentException(
                         "op_not_allowed: 'subtree' is only permitted on prefix-filterable path columns, not '" + colKey + "' on " + g.name);
                 params.add(v.asText());
-                params.add(escapeLike(v.asText()));
+                params.add(SqlLike.escape(v.asText()));
                 parts.add("(" + colKey + " = ? OR " + colKey + " LIKE ? || '.%')");
                 continue;
             }
@@ -272,11 +273,6 @@ public class AnalyticsPlanner {
             }
         }
         return parts.size()==1 ? parts.get(0) : "(" + String.join(" AND ", parts) + ")";
-    }
-
-    /** Escape LIKE metacharacters (backslash default escape) so a starts_with value is a literal prefix. */
-    private String escapeLike(String s){
-        return s.replace("\\","\\\\").replace("%","\\%").replace("_","\\_");
     }
 
     private Object value(JsonNode v){
@@ -353,7 +349,7 @@ public class AnalyticsPlanner {
                 // `kenya` — which is a cross-tenant read.
                 conj.add("(" + g.tenantColumn + " = ? OR " + g.tenantColumn + " LIKE ?)");
                 params.add(scope.tenantId);
-                params.add(escapeLikeLiteral(scope.tenantId) + ".%");
+                params.add(SqlLike.escape(scope.tenantId) + ".%");
             }
             else { conj.add(g.tenantColumn + " = ?"); params.add(scope.tenantId); }
         }
@@ -399,11 +395,6 @@ public class AnalyticsPlanner {
 
     private static String placeholders(int count) {
         return String.join(", ", Collections.nCopies(count, "?"));
-    }
-
-    /** Escape server-derived text before appending a SQL LIKE wildcard. */
-    static String escapeLikeLiteral(String value) {
-        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
     }
 
     // ---------- sort ----------

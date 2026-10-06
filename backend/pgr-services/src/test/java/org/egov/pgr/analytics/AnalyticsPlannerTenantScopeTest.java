@@ -25,6 +25,5 @@ public class AnalyticsPlannerTenantScopeTest {
         assertTrue(planned.sql.contains("(tenant_id = ? OR tenant_id LIKE ?)"), planned.sql);
         assertEquals("ke\\%\\_root.%", planned.params.get(planned.params.size() - 1));
         assertEquals("ke%_root", planned.params.get(planned.params.size() - 2));
-        assertEquals("ke\\\\root", AnalyticsPlanner.escapeLikeLiteral("ke\\root"));
     }
 }

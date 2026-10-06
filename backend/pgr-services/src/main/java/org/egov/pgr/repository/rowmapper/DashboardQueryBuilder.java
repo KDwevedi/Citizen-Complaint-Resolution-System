@@ -1,6 +1,7 @@
 package org.egov.pgr.repository.rowmapper;
 
 import org.egov.pgr.config.PGRConfiguration;
+import org.egov.pgr.util.SqlLike;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 
@@ -196,7 +197,7 @@ public class DashboardQueryBuilder {
         if (chunks.length == config.getStateLevelTenantIdLength()) {
             sb.append("(").append(column).append(" = ? OR ").append(column).append(" LIKE ?)");
             preparedStmtList.add(tenantId);
-            preparedStmtList.add(PGRQueryBuilder.escapeLikeLiteral(tenantId) + ".%");
+            preparedStmtList.add(SqlLike.escape(tenantId) + ".%");
         } else {
             sb.append(column).append(" = ?");
             preparedStmtList.add(tenantId);

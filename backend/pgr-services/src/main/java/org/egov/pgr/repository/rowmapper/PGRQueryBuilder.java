@@ -2,6 +2,7 @@ package org.egov.pgr.repository.rowmapper;
 
 import org.egov.pgr.config.PGRConfiguration;
 import org.egov.pgr.policy.PgrSearchScope;
+import org.egov.pgr.util.SqlLike;
 import org.egov.pgr.web.models.RequestSearchCriteria;
 import org.egov.tracer.model.CustomException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -104,7 +105,7 @@ public class PGRQueryBuilder {
                     addClauseIfRequired(preparedStmtList, builder);
                     builder.append(" (ser.tenantid = ? OR ser.tenantid LIKE ?) ");
                     preparedStmtList.add(tenantId);
-                    preparedStmtList.add(escapeLikeLiteral(tenantId) + ".%");
+                    preparedStmtList.add(SqlLike.escape(tenantId) + ".%");
                 } else {
                     addClauseIfRequired(preparedStmtList, builder);
                     builder.append(" ser.tenantid=? ");
@@ -232,11 +233,6 @@ public class PGRQueryBuilder {
         return builder;
     }
 
-    /** Escapes LIKE metacharacters in server-derived text before a wildcard is appended to it. */
-    static String escapeLikeLiteral(String value) {
-        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
-    }
-
     /**
      * Injects the RBAC scope's WHERE predicates. The same axes as
      * {@code AnalyticsPlanner.applyScope} in the analytics module (citizen self-scope, employee
@@ -279,7 +275,7 @@ public class PGRQueryBuilder {
                 // have to be escaped, or an id containing '_' would match any character there.
                 builder.append(" (ser.tenantId = ? OR ser.tenantId LIKE ?) ");
                 preparedStmtList.add(scope.tenantId);
-                preparedStmtList.add(escapeLikeLiteral(scope.tenantId) + ".%");
+                preparedStmtList.add(SqlLike.escape(scope.tenantId) + ".%");
             } else {
                 builder.append(" ser.tenantId = ? ");
                 preparedStmtList.add(scope.tenantId);

@@ -9,6 +9,7 @@ import org.egov.pgr.analytics.AnalyticsCatalog.Grain;
 import org.egov.pgr.analytics.model.KpiDefinition;
 import org.egov.pgr.policy.PgrSearchScope;
 import org.egov.pgr.config.PGRConfiguration;
+import org.egov.pgr.util.SqlLike;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -848,7 +849,7 @@ public class AnalyticsService {
         try {
             Long count = stateLevel
                     ? jdbc.queryForObject(STATE_RECORD_COUNT_SQL,
-                                          Long.class, tenantId, AnalyticsPlanner.escapeLikeLiteral(tenantId) + ".%")
+                                          Long.class, tenantId, SqlLike.escape(tenantId) + ".%")
                     : jdbc.queryForObject("SELECT count(*) FROM complaint_facts WHERE tenant_id = ?",
                                           Long.class, tenantId);
             if (count == null) return null;
