@@ -2,7 +2,7 @@ package org.egov.pgr.repository.rowmapper;
 
 import org.egov.pgr.config.PGRConfiguration;
 import org.egov.pgr.policy.PgrSearchScope;
-import org.egov.pgr.util.SqlLike;
+import org.egov.pgr.util.TenantSubtree;
 import org.egov.pgr.web.models.RequestSearchCriteria;
 import org.egov.tracer.model.CustomException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -98,19 +98,13 @@ public class PGRQueryBuilder {
 
                 String[] tenantIdChunks = tenantId.split("\\.");
 
-                if (tenantIdChunks.length == config.getStateLevelTenantIdLength()) {
-                    // Same delimiter-safety as the scope predicate below. Note this branch also
-                    // caught an empty tenantId, which used to bind the pattern '%' and match every
-                    // row of every tenant; it now binds '' and '.%', which match nothing.
-                    addClauseIfRequired(preparedStmtList, builder);
-                    builder.append(" (ser.tenantid = ? OR ser.tenantid LIKE ?) ");
-                    preparedStmtList.add(tenantId);
-                    preparedStmtList.add(SqlLike.escape(tenantId) + ".%");
-                } else {
-                    addClauseIfRequired(preparedStmtList, builder);
-                    builder.append(" ser.tenantid=? ");
-                    preparedStmtList.add(criteria.getTenantId());
-                }
+                // A state-level id covers its delimited subtree (see TenantSubtree). An empty
+                // tenantId splits to one segment and takes the subtree branch: it used to bind the
+                // pattern '%' and match every row of every tenant; it now binds '' and '.%',
+                // which match nothing.
+                boolean stateLevel = tenantIdChunks.length == config.getStateLevelTenantIdLength();
+                addClauseIfRequired(preparedStmtList, builder);
+                builder.append(" ").append(TenantSubtree.predicate("ser.tenantid", tenantId, stateLevel, preparedStmtList)).append(" ");
             }
         }
         Set<String> serviceCodes = criteria.getServiceCode();
@@ -266,20 +260,9 @@ public class PGRQueryBuilder {
         // never just as an unchecked echo of client input.
         if (scope.tenantId != null) {
             addClauseIfRequired(preparedStmtList, builder);
-            if (scope.tenantStateLevel) {
-                // The subtree is the tenant ITSELF plus everything under a '.' beneath it. A bare
-                // `LIKE value || '%'` also matches a SIBLING whose id merely starts with the same
-                // characters — with state.level.tenantid.length=1 that means root `ke` reading
-                // every row of the unrelated root `kenya` — which is a cross-tenant read. The
-                // delimiter has to be part of the pattern, and LIKE metacharacters in a tenant id
-                // have to be escaped, or an id containing '_' would match any character there.
-                builder.append(" (ser.tenantId = ? OR ser.tenantId LIKE ?) ");
-                preparedStmtList.add(scope.tenantId);
-                preparedStmtList.add(SqlLike.escape(scope.tenantId) + ".%");
-            } else {
-                builder.append(" ser.tenantId = ? ");
-                preparedStmtList.add(scope.tenantId);
-            }
+            // State level: the tenant plus its '.'-delimited subtree, never a sibling sharing a
+            // character prefix (root `ke` must not read root `kenya`). See TenantSubtree.
+            builder.append(" ").append(TenantSubtree.predicate("ser.tenantId", scope.tenantId, scope.tenantStateLevel, preparedStmtList)).append(" ");
         }
 
         if (scope.citizenUuid != null) {

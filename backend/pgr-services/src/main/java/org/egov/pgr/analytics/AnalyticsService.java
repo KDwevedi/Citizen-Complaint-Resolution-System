@@ -9,7 +9,7 @@ import org.egov.pgr.analytics.AnalyticsCatalog.Grain;
 import org.egov.pgr.analytics.model.KpiDefinition;
 import org.egov.pgr.policy.PgrSearchScope;
 import org.egov.pgr.config.PGRConfiguration;
-import org.egov.pgr.util.SqlLike;
+import org.egov.pgr.util.TenantSubtree;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -823,10 +823,6 @@ public class AnalyticsService {
     /** Injectable clock for cache-expiry tests (see AnalyticsServiceRecordCountTest). */
     private java.util.function.LongSupplier recordCountClock = System::currentTimeMillis;
 
-    /** Record count for a state-level tenant: the tenant itself plus its '.' subtree. */
-    static final String STATE_RECORD_COUNT_SQL =
-            "SELECT count(*) FROM complaint_facts WHERE (tenant_id = ? OR tenant_id LIKE ?)";
-
     /**
      * TENANT-CORPUS size of {@code complaint_facts} — how many fact rows exist for the
      * tenant subtree, using {@link AnalyticsPlanner#applyScope}'s tenant semantics
@@ -847,11 +843,10 @@ public class AnalyticsService {
         // same state-level test as PrincipalScopeResolver.resolve()
         boolean stateLevel = tenantId.split("\\.").length == stateLevelLen;
         try {
-            Long count = stateLevel
-                    ? jdbc.queryForObject(STATE_RECORD_COUNT_SQL,
-                                          Long.class, tenantId, SqlLike.escape(tenantId) + ".%")
-                    : jdbc.queryForObject("SELECT count(*) FROM complaint_facts WHERE tenant_id = ?",
-                                          Long.class, tenantId);
+            List<Object> binds = new ArrayList<>();
+            String sql = "SELECT count(*) FROM complaint_facts WHERE "
+                    + TenantSubtree.predicate("tenant_id", tenantId, stateLevel, binds);
+            Long count = jdbc.queryForObject(sql, Long.class, binds.toArray());
             if (count == null) return null;
             recordCountCache.put(tenantId, new long[]{count, now + configCacheTtlMs()});
             return count;

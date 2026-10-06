@@ -13,6 +13,7 @@ import org.egov.pgr.repository.rowmapper.PGRRowMapper;
 import org.egov.pgr.util.MDMSUtils;
 import org.egov.pgr.util.PGRConstants;
 import org.egov.pgr.util.PGRUtils;
+import org.egov.pgr.util.TenantSubtree;
 import org.egov.pgr.web.models.Document;
 import org.egov.pgr.web.models.RequestSearchCriteria;
 import org.egov.pgr.web.models.Service;
@@ -83,12 +84,15 @@ public class PGRRepository {
      * preserving each complaint tenant's own escalation policy.
      */
     public List<String> getComplaintTenantIds(String stateTenantId) {
+        // TenantSubtree escapes the id, so a state root containing '_' (e.g. 'ke_a') does not
+        // also discover 'kexa.city'.
+        List<Object> binds = new ArrayList<>();
         String query = utils.replaceSchemaPlaceholder(
-                "SELECT DISTINCT tenantid FROM {schema}.eg_pgr_service_v2 "
-                        + "WHERE tenantid = ? OR tenantid LIKE ? ORDER BY tenantid",
+                "SELECT DISTINCT tenantid FROM {schema}.eg_pgr_service_v2 WHERE "
+                        + TenantSubtree.predicate("tenantid", stateTenantId, true, binds)
+                        + " ORDER BY tenantid",
                 stateTenantId);
-        return jdbcTemplate.queryForList(query, String.class,
-                stateTenantId, stateTenantId + ".%");
+        return jdbcTemplate.queryForList(query, String.class, binds.toArray());
     }
 
     /**
