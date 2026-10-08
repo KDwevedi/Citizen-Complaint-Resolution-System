@@ -10,7 +10,7 @@ import path from 'node:path';
  * Why this shape:
  *   The configurator persists its session under the localStorage key
  *   `crs-auth-state` (see configurator/src/App.tsx). The shape is
- *   { authToken, user, environment, tenant, targetTenant, mode,
+ *   { authToken, user, environment, tenant, targetTenant,
  *     currentPhase, completedPhases }. App.tsx restores apiClient + the
  *     bridge digitClient from that blob on mount, so reproducing it offline
  *     gives us the same logged-in state without needing the UI login form.
@@ -80,12 +80,11 @@ function buildAuthStateBlob(token: string, userRequest: Record<string, unknown>)
     environment: BASE_URL,
     tenant: TENANT,
     targetTenant: TENANT,
-    // Management mode is the gate for `/manage/*` (react-admin) routes —
-    // EmployeeCreate, ComplaintCreate, etc. all live there. App.tsx routes
-    // onboarding-mode users to /phase/1 instead.
-    mode: 'management',
+    // `/manage/*` (react-admin: EmployeeCreate, ComplaintCreate, …) opens only
+    // once onboarding is done. App.tsx re-reads the status from PGR on load; the
+    // saved copy says done so the first render does not route to onboarding.
     currentPhase: 1,
-    completedPhases: [],
+    completedPhases: [1, 2, 3, 4, 5],
   };
 }
 

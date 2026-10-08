@@ -7,6 +7,7 @@ import { translatorFrom } from '@/onboarding/i18n';
 import { toast } from '@/hooks/use-toast';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { useState, createContext, useContext, useEffect, useCallback } from 'react';
+import { Loader2 } from 'lucide-react';
 import OnboardingLayout from './onboarding/OnboardingLayout';
 import { OnboardingI18n } from './onboarding/OnboardingI18n';
 import { appStore } from './providers/appStore';
@@ -64,10 +65,10 @@ import { identifyUser, trackEvent } from './lib/telemetry';
 import { clearLocalSession, SESSION_EXPIRED_KEY, signOutThisDevice } from './lib/session';
 import PageViewTracker from './components/PageViewTracker';
 import './App.css';
-import { LEGACY_PGR_DASHBOARD_ENABLED, ONBOARDING_GATE_ENABLED } from '@/config/featureFlags';
+import { LEGACY_PGR_DASHBOARD_ENABLED } from '@/config/featureFlags';
+import { workspaceProgress } from '@/identity/entry';
 
 // App context for global state
-type AppMode = 'onboarding' | 'management';
 
 interface AppState {
   isAuthenticated: boolean;
@@ -81,7 +82,6 @@ interface AppState {
    *  Set by Phase 1 after a successful tenant create; defaults to the session
    *  tenant so anything that skips Phase 1 keeps today's behavior. */
   targetTenant: string;
-  mode: AppMode;
   currentPhase: number;
   completedPhases: number[];
   undoStack: { id: string; action: string; description: string; timestamp: Date }[];
@@ -90,9 +90,8 @@ interface AppState {
 
 interface AppContextType {
   state: AppState;
-  login: (user: AppState['user'], env: string, tenant: string, mode: AppMode) => void;
+  login: (user: AppState['user'], env: string, tenant: string) => void;
   logout: () => Promise<void>;
-  setMode: (mode: AppMode) => void;
   /** Point subsequent onboarding writes/reads at a child tenant. Called by
    *  Phase 1 after `tenant.tenants` create succeeds. */
   setTargetTenant: (code: string) => void;
@@ -233,7 +232,7 @@ import { AUTH_STORAGE_KEY } from './lib/session';
 // session, read by LoginPage to explain why the operator was sent back.
 
 // Helper to restore apiClient from localStorage
-function restoreApiClientFromStorage(): { isAuthenticated: boolean; user: AppState['user']; environment: string; tenant: string; targetTenant: string; mode: AppMode; currentPhase: number; completedPhases: number[] } | null {
+function restoreApiClientFromStorage(): { isAuthenticated: boolean; user: AppState['user']; environment: string; tenant: string; targetTenant: string; currentPhase: number; completedPhases: number[] } | null {
   const saved = localStorage.getItem(AUTH_STORAGE_KEY);
   if (!saved) return null;
 
@@ -277,7 +276,6 @@ function restoreApiClientFromStorage(): { isAuthenticated: boolean; user: AppSta
         environment: restoredEnv,
         tenant: restoredTenant,
         targetTenant: parsed.targetTenant || restoredTenant,
-        mode: parsed.mode || 'onboarding',
         currentPhase: parsed.currentPhase || 1,
         completedPhases: parsed.completedPhases || [],
       };
@@ -317,7 +315,6 @@ function App() {
       environment: getApiBaseUrl(),
       tenant: defaultTenant,
       targetTenant: defaultTenant,
-      mode: 'onboarding',
       currentPhase: 1,
       completedPhases: [],
       undoStack: [],
@@ -365,7 +362,7 @@ function App() {
         tenant: state.tenant,
         roles: state.user.roles,
       });
-      trackEvent('session_restored', { tenant: state.tenant, mode: state.mode });
+      trackEvent('session_restored', { tenant: state.tenant });
     }
   }, []); // Only run once on mount
 
@@ -382,19 +379,32 @@ function App() {
         environment: state.environment,
         tenant: state.tenant,
         targetTenant: state.targetTenant,
-        mode: state.mode,
         currentPhase: state.currentPhase,
         completedPhases: state.completedPhases,
         authToken: token,
       };
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authData));
     }
-  }, [state.isAuthenticated, state.user, state.environment, state.tenant, state.targetTenant, state.mode, state.currentPhase, state.completedPhases]);
+  }, [state.isAuthenticated, state.user, state.environment, state.tenant, state.targetTenant, state.currentPhase, state.completedPhases]);
 
-  const login = (user: AppState['user'], env: string, tenant: string, mode: AppMode) => {
+  // Onboarding status decides whether the console or onboarding opens, so a restored session reads it
+  // from PGR again rather than trusting the copy saved with it: another device may have finished setup.
+  const [progressChecked, setProgressChecked] = useState(() => !state.isAuthenticated);
+  useEffect(() => {
+    if (!state.isAuthenticated || progressChecked) return;
+    let live = true;
+    workspaceProgress(state.tenant, state.user?.roles.includes('ACCOUNT_ADMIN') ?? false)
+      .then((completedPhases) => { if (live) setState(s => ({ ...s, completedPhases })); })
+      // Unreachable PGR: keep the saved status rather than lock the person out.
+      .catch(() => undefined)
+      .finally(() => { if (live) setProgressChecked(true); });
+    return () => { live = false; };
+  }, [state.isAuthenticated, state.tenant, state.user, progressChecked]);
+
+  const login = (user: AppState['user'], env: string, tenant: string) => {
     // Fresh login resets targetTenant to the session tenant. Phase 1 will
     // point it at a child tenant once a create succeeds.
-    setState(s => ({ ...s, isAuthenticated: true, user, environment: env, tenant, targetTenant: tenant, mode }));
+    setState(s => ({ ...s, isAuthenticated: true, user, environment: env, tenant, targetTenant: tenant }));
 
     // Configure digitClient with the same auth as apiClient
     const { token } = apiClient.getAuth();
@@ -420,13 +430,8 @@ function App() {
         tenant,
         roles: user.roles,
       });
-      trackEvent('login', { tenant, mode, environment: env });
+      trackEvent('login', { tenant, environment: env });
     }
-  };
-
-  const setMode = (mode: AppMode) => {
-    setState(s => ({ ...s, mode }));
-    trackEvent('mode_switch', { mode });
   };
 
   const setTargetTenant = (code: string) => {
@@ -439,7 +444,7 @@ function App() {
     // Storage, both API clients and the cached providers first, then the BFF
     // session best-effort, so sign-out never fails closed.
     await signOutThisDevice();
-    setState(s => ({ ...s, isAuthenticated: false, user: null, mode: 'onboarding', currentPhase: 1, completedPhases: [], targetTenant: s.tenant }));
+    setState(s => ({ ...s, isAuthenticated: false, user: null, currentPhase: 1, completedPhases: [], targetTenant: s.tenant }));
   };
 
   const completePhase = async (phase: number, skip = false): Promise<boolean> => {
@@ -528,7 +533,6 @@ function App() {
     state,
     login,
     logout,
-    setMode,
     setTargetTenant,
     completePhase,
     goToPhase,
@@ -538,9 +542,15 @@ function App() {
     toggleHelp,
   };
 
-  const onboardingDone = isOnboardingComplete(state.completedPhases);
-  const inOnboarding = ONBOARDING_GATE_ENABLED ? !onboardingDone : state.mode === 'onboarding';
+  // One way: account creation, then onboarding until every step is done, then the console for good.
+  const inOnboarding = !isOnboardingComplete(state.completedPhases);
   const onboardingResume = resumePath(state.completedPhases);
+  const checkingProgress = state.isAuthenticated && !progressChecked;
+  const loadingProgress = (
+    <div className="flex h-screen items-center justify-center text-muted-foreground">
+      <Loader2 className="h-6 w-6 animate-spin" />
+    </div>
+  );
 
   return (
     <AppContext.Provider value={contextValue}>
@@ -557,10 +567,11 @@ function App() {
               nobody has an account yet, so it sits outside the auth gate. */}
           <Route path="/signup" element={<SignupPage />} />
 
-          {/* Onboarding. With the gate on, an account stays here until every
-              step is done; with it off, the mode switch decides as before. */}
+          {/* Onboarding. An account stays here until every step is done, and
+              cannot come back once it is. */}
           <Route path="/" element={
-            state.isAuthenticated
+            checkingProgress ? loadingProgress
+            : state.isAuthenticated
               ? inOnboarding ? <OnboardingI18n><MastersCapabilityProvider><OnboardingLayout /></MastersCapabilityProvider></OnboardingI18n> : <Navigate to="/manage" />
               : <RootLanding />
           }>
@@ -576,9 +587,10 @@ function App() {
             <Route path="complete" element={<Navigate to="/onboarding/complaints" replace />} />
           </Route>
 
-          {/* Management Mode Routes — react-admin powered */}
+          {/* The management console (react-admin), once onboarding is done */}
           <Route path="/manage/*" element={
-            state.isAuthenticated && !inOnboarding
+            checkingProgress ? loadingProgress
+            : state.isAuthenticated && !inOnboarding
               ? <ManagementAdmin />
               : state.isAuthenticated ? <Navigate to={onboardingResume} /> : <Navigate to="/login" />
           } />

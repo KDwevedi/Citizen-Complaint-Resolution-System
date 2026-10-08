@@ -1,4 +1,4 @@
-import { enterWorkspace } from '@/identity/entry';
+import { enterWorkspace, soleWorkspace } from '@/identity/entry';
 import { Invitations } from '@/identity/Invitations';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -65,6 +65,13 @@ export default function LoginPage() {
         const available = await tenants();
         setTenantOptions(available.tenants);
         setInvitations(current.pendingInvitations ?? []);
+        // One workspace and nothing to accept: straight in, to onboarding or the console as its status says.
+        const only = current.pendingInvitations?.length ? undefined : soleWorkspace(available.tenants);
+        if (only) {
+          setPhase('entering');
+          try { await enterWorkspace(only.tenantId, current.user); return; }
+          catch (caught) { setError(caught instanceof Error ? caught.message : 'Could not open that workspace.'); }
+        }
         if (available.tenants.length) setPhase('tenants');
         else if (current.pendingInvitations?.length) setPhase('invitations');
         else window.location.assign('/configurator/signup');

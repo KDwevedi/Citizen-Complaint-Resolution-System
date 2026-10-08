@@ -31,7 +31,7 @@ import {
   tenants,
   updateSignup,
 } from '@/api/onboarding';
-import { enterWorkspace } from '@/identity/entry';
+import { enterWorkspace, soleWorkspace } from '@/identity/entry';
 import { Invitations } from '@/identity/Invitations';
 import type { Invitation } from '@/api/onboarding';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -343,6 +343,13 @@ function SignupFlow() {
       const view = await tenants();
       if (view.tenants.length) {
         setTenantOptions(view.tenants);
+        // One workspace: straight in, to onboarding or the console as its status says.
+        const only = soleWorkspace(view.tenants);
+        if (only) {
+          setPhase('entering');
+          try { await enterWorkspace(only.tenantId, current.user); return; }
+          catch (caught) { setError(errorText(caught)); }
+        }
         setPhase('chooseTenant');
         return;
       }
@@ -627,6 +634,17 @@ function SignupFlow() {
         const view = await tenants();
         if (!live) return;
         setTenantOptions(view.tenants);
+        // Straight into the workspace just created, which opens onboarding at its first step. The
+        // picker is only for someone who already belonged to other workspaces.
+        const created = view.tenants.find((option) => option.organizationAlias === urlSlug && !option.code)
+          ?? soleWorkspace(view.tenants);
+        if (created) {
+          // Leaving 'provisioning' ends this effect, so a failure below is not gated on `live`.
+          setPhase('entering');
+          try { await enterWorkspace(created.tenantId, sessionUser); }
+          catch (caught) { setError(errorText(caught)); setPhase('chooseTenant'); }
+          return;
+        }
         setPhase('chooseTenant');
       } catch (caught) {
         if (live) setError(errorText(caught));
