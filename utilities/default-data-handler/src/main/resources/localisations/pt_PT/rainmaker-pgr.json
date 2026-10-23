@@ -546,6 +546,12 @@
         "locale": "pt_PT"
     },
     {
+        "code": "CS_COMMON_TRACK_COMPLAINT_NEUTRAL_TEXT",
+        "message": "Guarde o número da reclamação para acompanhar a reclamação na web ou na aplicação móvel.",
+        "module": "rainmaker-pgr",
+        "locale": "pt_PT"
+    },
+    {
         "code": "CS_COMMON_TRY_AGAIN",
         "message": "Tentar novamente",
         "module": "rainmaker-pgr",

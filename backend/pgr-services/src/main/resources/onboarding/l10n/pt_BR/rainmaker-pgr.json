@@ -90,6 +90,7 @@
 {"code": "CS_COMMON_SUBMIT", "message": "ENVIAR", "module": "rainmaker-pgr", "locale": "pt_BR"},
 {"code": "CS_COMMON_THANK_YOU", "message": "Obrigado", "module": "rainmaker-pgr", "locale": "pt_BR"},
 {"code": "CS_COMMON_TRACK_COMPLAINT_TEXT", "message": "A notificação com o número da reclamação é enviada para o seu número de celular cadastrado. Você pode acompanhar o status da reclamação pelo aplicativo móvel ou pela web.", "module": "rainmaker-pgr", "locale": "pt_BR"},
+{"code": "CS_COMMON_TRACK_COMPLAINT_NEUTRAL_TEXT", "message": "Guarde o número da reclamação para acompanhar a reclamação pela web ou pelo aplicativo móvel.", "module": "rainmaker-pgr", "locale": "pt_BR"},
 {"code": "CS_COMMON_TRY_AGAIN", "message": "Tentar novamente", "module": "rainmaker-pgr", "locale": "pt_BR"},
 {"code": "CS_COMMON_VIEW_COMPLAINT", "message": "Ver reclamação", "module": "rainmaker-pgr", "locale": "pt_BR"},
 {"code": "CS_COMPLAINT_ADDTIONAL_DETAILS", "message": "Detalhes adicionais", "module": "rainmaker-pgr", "locale": "pt_BR"},
